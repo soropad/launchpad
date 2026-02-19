@@ -14,6 +14,7 @@ pub enum DataKey {
     Symbol,
     Decimals,
     TotalSupply,
+    MaxSupply,
     Balance(Address),
     Allowance(Address, Address), // (owner, spender)
 }
@@ -43,10 +44,17 @@ impl TokenContract {
         name: String,
         symbol: String,
         initial_supply: i128,
+        max_supply: Option<i128>,
     ) {
         // Prevent re-initialization
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("already initialized");
+        }
+
+        if let Some(cap) = max_supply {
+            assert!(cap > 0, "max_supply must be positive");
+            assert!(initial_supply <= cap, "initial_supply exceeds max_supply");
+            env.storage().instance().set(&DataKey::MaxSupply, &cap);
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
@@ -155,6 +163,10 @@ impl TokenContract {
         env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0)
     }
 
+    pub fn max_supply(env: Env) -> Option<i128> {
+        env.storage().instance().get(&DataKey::MaxSupply)
+    }
+
     // ── Internal helpers ────────────────────────────────────────────────
 
     fn _require_admin(env: &Env) {
@@ -163,12 +175,18 @@ impl TokenContract {
     }
 
     fn _mint(env: &Env, to: &Address, amount: i128) {
+        let supply: i128 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+        let new_supply = supply + amount;
+
+        if let Some(cap) = env.storage().instance().get::<DataKey, i128>(&DataKey::MaxSupply) {
+            assert!(new_supply <= cap, "mint would exceed max_supply");
+        }
+
         let key = DataKey::Balance(to.clone());
         let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         env.storage().persistent().set(&key, &(balance + amount));
 
-        let supply: i128 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply + amount));
+        env.storage().instance().set(&DataKey::TotalSupply, &new_supply);
 
         env.events().publish((symbol_short!("mint"), to.clone()), amount);
     }
@@ -229,6 +247,7 @@ mod test {
             &String::from_str(&env, "TestToken"),
             &String::from_str(&env, "TST"),
             &1_000_000_0000000i128, // 1M tokens with 7 decimals
+            &None,
         );
 
         (env, client, admin, user)
@@ -255,6 +274,7 @@ mod test {
             &String::from_str(&env, "Dup"),
             &String::from_str(&env, "DUP"),
             &0i128,
+            &None,
         );
     }
 
@@ -329,5 +349,84 @@ mod test {
         let (_, client, _, user) = setup();
         client.set_admin(&user);
         assert_eq!(client.admin(), user);
+    }
+
+    // ── max_supply tests ────────────────────────────────────────────────
+
+    fn setup_with_cap() -> (Env, TokenContractClient<'static>, Address, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(
+            &admin,
+            &7u32,
+            &String::from_str(&env, "CappedToken"),
+            &String::from_str(&env, "CAP"),
+            &500_0000000i128,
+            &Some(1_000_0000000i128),
+        );
+
+        (env, client, admin, user)
+    }
+
+    #[test]
+    fn test_max_supply_getter_none() {
+        let (_, client, _, _) = setup();
+        assert_eq!(client.max_supply(), None);
+    }
+
+    #[test]
+    fn test_max_supply_getter_some() {
+        let (_, client, _, _) = setup_with_cap();
+        assert_eq!(client.max_supply(), Some(1_000_0000000i128));
+    }
+
+    #[test]
+    fn test_mint_within_max_supply() {
+        let (_, client, _, user) = setup_with_cap();
+        client.mint(&user, &500_0000000i128);
+        assert_eq!(client.total_supply(), 1_000_0000000i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "mint would exceed max_supply")]
+    fn test_mint_exceeds_max_supply() {
+        let (_, client, _, user) = setup_with_cap();
+        client.mint(&user, &500_0000001i128);
+    }
+
+    #[test]
+    fn test_mint_exact_max_supply() {
+        let (_, client, _, user) = setup_with_cap();
+        // Mint exactly to the cap boundary
+        client.mint(&user, &500_0000000i128);
+        assert_eq!(client.total_supply(), 1_000_0000000i128);
+        assert_eq!(client.max_supply(), Some(1_000_0000000i128));
+    }
+
+    #[test]
+    #[should_panic(expected = "initial_supply exceeds max_supply")]
+    fn test_initial_supply_exceeds_max_supply() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.initialize(
+            &admin,
+            &7u32,
+            &String::from_str(&env, "Bad"),
+            &String::from_str(&env, "BAD"),
+            &2_000_0000000i128,
+            &Some(1_000_0000000i128),
+        );
     }
 }
