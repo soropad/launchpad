@@ -1,16 +1,9 @@
-[package]
-name = "soroban-token"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-soroban-sdk = { version = "21.0.0", features = ["alloc"] }
-
-[dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+[workspace]
+resolver = "2"
+members = [
+    "contracts/token",
+    "contracts/vesting",
+]
 
 [profile.release]
 opt-level = "z"
