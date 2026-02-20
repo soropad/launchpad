@@ -50,6 +50,11 @@ impl VestingContract {
         env.storage()
             .instance()
             .set(&DataKey::TokenContract, &token_contract);
+
+        env.events().publish(
+            (symbol_short!("init"),),
+            (admin, token_contract),
+        );
     }
 
     // ── Admin actions ───────────────────────────────────────────────────

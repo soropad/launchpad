@@ -58,6 +58,11 @@ impl TokenContract {
         if initial_supply > 0 {
             Self::_mint(&env, &admin, initial_supply);
         }
+
+        env.events().publish(
+            (symbol_short!("init"),),
+            admin,
+        );
     }
 
     // ── Admin actions ───────────────────────────────────────────────────
@@ -81,6 +86,11 @@ impl TokenContract {
     pub fn set_admin(env: Env, new_admin: Address) {
         Self::_require_admin(&env);
         env.storage().instance().set(&DataKey::Admin, &new_admin);
+
+        env.events().publish(
+            (symbol_short!("set_admin"),),
+            new_admin,
+        );
     }
 
     // ── Token operations ────────────────────────────────────────────────
