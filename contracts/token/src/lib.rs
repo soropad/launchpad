@@ -68,6 +68,11 @@ impl TokenContract {
         if initial_supply > 0 {
             Self::_mint(&env, &admin, initial_supply);
         }
+
+        env.events().publish(
+            (symbol_short!("init"),),
+            admin,
+        );
     }
 
     // ── Admin actions ───────────────────────────────────────────────────
@@ -105,19 +110,30 @@ impl TokenContract {
         env.storage().instance().remove(&DataKey::PendingAdmin);
     }
 
-    /// Freeze an account, preventing it from sending tokens. Admin only.
-    pub fn freeze_account(env: Env, addr: Address) {
-        Self::_require_admin(&env);
-        env.storage().persistent().set(&DataKey::Frozen(addr.clone()), &true);
-        env.events().publish((symbol_short!("freeze"), addr), true);
-    }
+   /// Transfer admin role instantly.
+/// TODO (issue #2): replace with two-step propose_admin / accept_admin.
+pub fn set_admin(env: Env, new_admin: Address) {
+    Self::_require_admin(&env);
+    env.storage().instance().set(&DataKey::Admin, &new_admin);
+    env.events().publish(
+        (symbol_short!("set_admin"),),
+        new_admin,
+    );
+}
 
-    /// Unfreeze a previously frozen account. Admin only.
-    pub fn unfreeze_account(env: Env, addr: Address) {
-        Self::_require_admin(&env);
-        env.storage().persistent().remove(&DataKey::Frozen(addr.clone()));
-        env.events().publish((symbol_short!("freeze"), addr), false);
-    }
+/// Freeze an account, preventing it from sending tokens. Admin only.
+pub fn freeze_account(env: Env, addr: Address) {
+    Self::_require_admin(&env);
+    env.storage().persistent().set(&DataKey::Frozen(addr.clone()), &true);
+    env.events().publish((symbol_short!("freeze"), addr), true);
+}
+
+/// Unfreeze a previously frozen account. Admin only.
+pub fn unfreeze_account(env: Env, addr: Address) {
+    Self::_require_admin(&env);
+    env.storage().persistent().remove(&DataKey::Frozen(addr.clone()));
+    env.events().publish((symbol_short!("freeze"), addr), false);
+}
 
     // ── Token operations ────────────────────────────────────────────────
 
