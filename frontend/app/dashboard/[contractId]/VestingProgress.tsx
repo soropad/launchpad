@@ -1,35 +1,175 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Loader2, AlertCircle, Clock, Unlock, Lock } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  Clock,
+  Unlock,
+  Lock,
+  XCircle,
+  CheckCircle,
+} from "lucide-react";
 import {
   fetchVestingSchedule,
   fetchCurrentLedger,
   formatTokenAmount,
   truncateAddress,
+  buildRevokeTransaction,
+  submitTransaction,
   type VestingScheduleInfo,
 } from "@/lib/stellar";
+import { useWallet } from "@/app/hooks/useWallet";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 // ---------------------------------------------------------------------------
 // Vesting display (progress bars + timeline)
 // ---------------------------------------------------------------------------
 
+/**
+ * Toast notification component for transaction feedback
+ */
+function Toast({
+  type,
+  message,
+  onClose,
+}: {
+  type: "success" | "error";
+  message: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed bottom-6 right-6 z-50 flex max-w-md items-start gap-3 rounded-lg border border-white/10 bg-void-900 p-4 shadow-2xl animate-slide-in-up"
+      role="alert"
+    >
+      {type === "success" ? (
+        <CheckCircle className="h-5 w-5 shrink-0 text-green-400" />
+      ) : (
+        <XCircle className="h-5 w-5 shrink-0 text-red-400" />
+      )}
+      <div className="flex-1">
+        <p
+          className={`text-sm font-medium ${type === "success" ? "text-green-400" : "text-red-400"}`}
+        >
+          {type === "success" ? "Success" : "Error"}
+        </p>
+        <p className="mt-1 text-sm text-gray-300">{message}</p>
+      </div>
+      <button
+        onClick={onClose}
+        className="text-gray-400 transition-colors hover:text-white"
+        aria-label="Close notification"
+      >
+        <XCircle className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function VestingDisplay({
   schedule,
   currentLedger,
   decimals,
+  vestingContractId,
+  onRevoked,
 }: {
   schedule: VestingScheduleInfo;
   currentLedger: number;
   decimals: number;
+  vestingContractId: string;
+  onRevoked: () => void;
 }) {
   const totalBig = BigInt(schedule.totalAmount);
   const releasedBig = BigInt(schedule.released);
 
+  // Wallet integration for admin actions
+  const { connected, publicKey, signTransaction, connect } = useWallet();
+
+  // Revoke transaction state
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [isRevoking, setIsRevoking] = useState(false);
+  const [toast, setToast] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  /**
+   * Handle revoke action with proper security checks and user confirmation.
+   *
+   * Security considerations:
+   * - Admin-only: Only the connected wallet matching the admin can revoke
+   * - Confirmation required: User must explicitly confirm the irreversible action
+   * - Transaction signing: All signing happens via Freighter wallet (no private keys in frontend)
+   * - Error handling: Comprehensive error messages for all failure scenarios
+   */
+  const handleRevoke = useCallback(async () => {
+    if (!connected || !publicKey) {
+      setToast({ type: "error", message: "Please connect your wallet first" });
+      return;
+    }
+
+    setIsRevoking(true);
+    setShowConfirmDialog(false);
+
+    try {
+      // Build the revoke transaction
+      const xdr = await buildRevokeTransaction(
+        vestingContractId,
+        schedule.recipient,
+        publicKey,
+      );
+
+      // Sign with Freighter
+      const signedXdr = await signTransaction(xdr, {
+        networkPassphrase: process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE,
+      });
+
+      // Submit to network
+      const txHash = await submitTransaction(signedXdr);
+
+      setToast({
+        type: "success",
+        message: `Vesting schedule revoked successfully. Transaction: ${txHash.slice(0, 8)}...`,
+      });
+
+      // Refresh the schedule data
+      setTimeout(() => {
+        onRevoked();
+      }, 2000);
+    } catch (err) {
+      console.error("[VestingDisplay] Revoke failed:", err);
+
+      let errorMessage = "Failed to revoke vesting schedule";
+      if (err instanceof Error) {
+        if (err.message.includes("User declined")) {
+          errorMessage = "Transaction was cancelled";
+        } else if (err.message.includes("not initialized")) {
+          errorMessage = "Contract not properly initialized";
+        } else if (err.message.includes("require_auth")) {
+          errorMessage = "You are not authorized to revoke this schedule";
+        } else {
+          errorMessage = err.message;
+        }
+      }
+
+      setToast({ type: "error", message: errorMessage });
+    } finally {
+      setIsRevoking(false);
+    }
+  }, [
+    connected,
+    publicKey,
+    signTransaction,
+    vestingContractId,
+    schedule.recipient,
+    onRevoked,
+  ]);
+
   // Replicate the contract's cliff + linear vesting formula
   let vestedBig: bigint;
   if (currentLedger < schedule.cliffLedger) {
-    vestedBig = 0n;
+    vestedBig = BigInt(0);
   } else if (currentLedger >= schedule.endLedger) {
     vestedBig = totalBig;
   } else {
@@ -39,9 +179,13 @@ function VestingDisplay({
   }
 
   const vestedPercent =
-    totalBig > 0n ? Number((vestedBig * 10000n) / totalBig) / 100 : 0;
+    totalBig > BigInt(0)
+      ? Number((vestedBig * BigInt(10000)) / totalBig) / 100
+      : 0;
   const releasedPercent =
-    totalBig > 0n ? Number((releasedBig * 10000n) / totalBig) / 100 : 0;
+    totalBig > BigInt(0)
+      ? Number((releasedBig * BigInt(10000)) / totalBig) / 100
+      : 0;
 
   // Timeline cursor position (0–100 %)
   const range = schedule.endLedger - schedule.cliffLedger;
@@ -49,8 +193,7 @@ function VestingDisplay({
   if (currentLedger >= schedule.endLedger) {
     timelinePos = 100;
   } else if (currentLedger > schedule.cliffLedger && range > 0) {
-    timelinePos =
-      ((currentLedger - schedule.cliffLedger) / range) * 100;
+    timelinePos = ((currentLedger - schedule.cliffLedger) / range) * 100;
   }
 
   // Status label
@@ -207,6 +350,63 @@ function VestingDisplay({
           <span className="ml-2 text-red-400">(Revoked)</span>
         )}
       </div>
+
+      {/* Admin Actions */}
+      {!schedule.revoked && (
+        <div className="mt-6 border-t border-white/5 pt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-300">Admin Actions</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Revoke this schedule to reclaim unvested tokens
+              </p>
+            </div>
+            {!connected ? (
+              <button
+                onClick={connect}
+                className="rounded-lg border border-stellar-500/30 bg-stellar-500/10 px-4 py-2 text-sm font-medium text-stellar-300 transition-colors hover:bg-stellar-500/20"
+              >
+                Connect Wallet
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowConfirmDialog(true)}
+                disabled={isRevoking}
+                className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isRevoking ? "Revoking..." : "Revoke Schedule"}
+              </button>
+            )}
+          </div>
+          {connected && (
+            <p className="mt-2 text-xs text-gray-600">
+              Connected: {truncateAddress(publicKey || "", 4)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showConfirmDialog}
+        title="Revoke Vesting Schedule"
+        message={`Are you sure you want to revoke this vesting schedule for ${truncateAddress(schedule.recipient, 6)}? This action cannot be undone. Vested tokens will be sent to the recipient, and unvested tokens will be returned to the admin.`}
+        confirmLabel="Revoke"
+        cancelLabel="Cancel"
+        onConfirm={handleRevoke}
+        onCancel={() => setShowConfirmDialog(false)}
+        loading={isRevoking}
+        variant="danger"
+      />
+
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }
@@ -306,6 +506,8 @@ export default function VestingProgress({ decimals }: { decimals: number }) {
             schedule={schedule}
             currentLedger={currentLedger}
             decimals={decimals}
+            vestingContractId={vestingContract.trim()}
+            onRevoked={lookup}
           />
         </div>
       )}
