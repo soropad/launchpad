@@ -31,6 +31,15 @@ export interface TokenHolder {
   sharePercent: number;
 }
 
+export interface VestingScheduleInfo {
+  recipient: string;
+  totalAmount: string;
+  cliffLedger: number;
+  endLedger: number;
+  released: string;
+  revoked: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Soroban RPC helpers
 // ---------------------------------------------------------------------------
@@ -212,6 +221,51 @@ export async function fetchTopHolders(
     // Horizon query may fail for Soroban-only tokens — expected.
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Vesting helpers
+// ---------------------------------------------------------------------------
+
+/** Extract a named field from a Soroban struct (ScVal map). */
+function getStructField(
+  entries: StellarSdk.xdr.ScMapEntry[],
+  name: string,
+): StellarSdk.xdr.ScVal {
+  const entry = entries.find((e) => decodeString(e.key()) === name);
+  if (!entry) throw new Error(`Missing struct field: ${name}`);
+  return entry.val();
+}
+
+/**
+ * Fetch the current ledger sequence number from Soroban RPC.
+ */
+export async function fetchCurrentLedger(): Promise<number> {
+  const result = await rpc.getLatestLedger();
+  return result.sequence;
+}
+
+/**
+ * Fetch a vesting schedule from a Soroban vesting contract.
+ */
+export async function fetchVestingSchedule(
+  vestingContractId: string,
+  recipient: string,
+): Promise<VestingScheduleInfo> {
+  const recipientScVal = new StellarSdk.Address(recipient).toScVal();
+  const result = await simulateCall(vestingContractId, "get_schedule", [
+    recipientScVal,
+  ]);
+
+  const fields = result.map()!;
+  return {
+    recipient: decodeAddress(getStructField(fields, "recipient")),
+    totalAmount: decodeI128(getStructField(fields, "total_amount")),
+    cliffLedger: decodeU32(getStructField(fields, "cliff_ledger")),
+    endLedger: decodeU32(getStructField(fields, "end_ledger")),
+    released: decodeI128(getStructField(fields, "released")),
+    revoked: getStructField(fields, "revoked").b(),
+  };
 }
 
 // ---------------------------------------------------------------------------
