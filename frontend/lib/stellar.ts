@@ -9,8 +9,7 @@ const SOROBAN_RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
   "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-  StellarSdk.Networks.TESTNET;
+  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,12 +50,12 @@ const rpc = new StellarSdk.rpc.Server(SOROBAN_RPC_URL);
 async function simulateCall(
   contractId: string,
   method: string,
-  args: StellarSdk.xdr.ScVal[] = []
+  args: StellarSdk.xdr.ScVal[] = [],
 ): Promise<StellarSdk.xdr.ScVal> {
   const contract = new StellarSdk.Contract(contractId);
   const account = new StellarSdk.Account(
     "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-    "0"
+    "0",
   );
 
   const tx = new StellarSdk.TransactionBuilder(account, {
@@ -70,9 +69,7 @@ async function simulateCall(
   const sim = await rpc.simulateTransaction(tx);
 
   if (StellarSdk.rpc.Api.isSimulationError(sim)) {
-    throw new Error(
-      `Soroban simulation error (${method}): ${sim.error}`
-    );
+    throw new Error(`Soroban simulation error (${method}): ${sim.error}`);
   }
 
   if (!StellarSdk.rpc.Api.isSimulationSuccess(sim) || !sim.result) {
@@ -119,9 +116,7 @@ function decodeAddress(val: StellarSdk.xdr.ScVal): string {
 /**
  * Fetch full token metadata from a Soroban SEP-41 token contract.
  */
-export async function fetchTokenInfo(
-  contractId: string
-): Promise<TokenInfo> {
+export async function fetchTokenInfo(contractId: string): Promise<TokenInfo> {
   const [nameVal, symbolVal, decimalsVal, adminVal] = await Promise.all([
     simulateCall(contractId, "name"),
     simulateCall(contractId, "symbol"),
@@ -171,7 +166,7 @@ export async function fetchTopHolders(
   contractId: string,
   _symbol?: string,
   _issuer?: string,
-  limit = 10
+  limit = 10,
 ): Promise<TokenHolder[]> {
   try {
     // Attempt to read ledger entries for known holder patterns.
@@ -191,16 +186,15 @@ export async function fetchTopHolders(
       // Calculate total for percentage
       let total = BigInt(0);
       const parsed = records.map((acc) => {
-        const bal =
-          acc.balances.find(
-            (b) =>
-              "asset_code" in b &&
-              b.asset_code === _symbol &&
-              "asset_issuer" in b &&
-              b.asset_issuer === _issuer
-          );
+        const bal = acc.balances.find(
+          (b) =>
+            "asset_code" in b &&
+            b.asset_code === _symbol &&
+            "asset_issuer" in b &&
+            b.asset_issuer === _issuer,
+        );
         const raw = BigInt(
-          Math.round(parseFloat(bal ? bal.balance : "0") * 1e7)
+          Math.round(parseFloat(bal ? bal.balance : "0") * 1e7),
         );
         total += raw;
         return { address: acc.account_id, rawBalance: raw };
@@ -273,10 +267,7 @@ export async function fetchVestingSchedule(
 // ---------------------------------------------------------------------------
 
 /** Format a raw integer token amount using the given decimals. */
-export function formatTokenAmount(
-  raw: string,
-  decimals: number
-): string {
+export function formatTokenAmount(raw: string, decimals: number): string {
   if (raw === "N/A") return raw;
   const num = BigInt(raw);
   const divisor = BigInt(10) ** BigInt(decimals);
@@ -293,4 +284,92 @@ export function formatTokenAmount(
 export function truncateAddress(addr: string, chars = 4): string {
   if (addr.length <= chars * 2 + 3) return addr;
   return `${addr.slice(0, chars + 1)}...${addr.slice(-chars)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Transaction building and submission
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a transaction XDR for revoking a vesting schedule.
+ * Returns the unsigned transaction XDR string.
+ */
+export async function buildRevokeTransaction(
+  vestingContractId: string,
+  recipientAddress: string,
+  sourcePublicKey: string,
+): Promise<string> {
+  const contract = new StellarSdk.Contract(vestingContractId);
+  const recipientScVal = new StellarSdk.Address(recipientAddress).toScVal();
+
+  // Get source account
+  const horizon = new StellarSdk.Horizon.Server(HORIZON_URL);
+  const sourceAccount = await horizon.loadAccount(sourcePublicKey);
+
+  // Build transaction
+  const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+    fee: StellarSdk.BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call("revoke", recipientScVal))
+    .setTimeout(30)
+    .build();
+
+  // Simulate to get resource fees
+  const simulated = await rpc.simulateTransaction(tx);
+
+  if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
+    throw new Error(`Simulation failed: ${simulated.error}`);
+  }
+
+  if (!StellarSdk.rpc.Api.isSimulationSuccess(simulated)) {
+    throw new Error("Transaction simulation was not successful");
+  }
+
+  // Assemble the transaction with simulation results
+  const assembled = StellarSdk.rpc.assembleTransaction(tx, simulated);
+
+  return assembled.build().toXDR();
+}
+
+/**
+ * Submit a signed transaction XDR to the network.
+ * Returns the transaction hash on success.
+ */
+export async function submitTransaction(signedXdr: string): Promise<string> {
+  const tx = StellarSdk.TransactionBuilder.fromXDR(
+    signedXdr,
+    NETWORK_PASSPHRASE,
+  );
+
+  const result = await rpc.sendTransaction(tx as StellarSdk.Transaction);
+
+  if (result.status === "ERROR") {
+    throw new Error(
+      `Transaction failed: ${result.errorResult?.toXDR("base64")}`,
+    );
+  }
+
+  // Poll for transaction result
+  let getResponse = await rpc.getTransaction(result.hash);
+  let attempts = 0;
+  const maxAttempts = 30;
+
+  while (getResponse.status === "NOT_FOUND" && attempts < maxAttempts) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    getResponse = await rpc.getTransaction(result.hash);
+    attempts++;
+  }
+
+  if (getResponse.status === "NOT_FOUND") {
+    throw new Error("Transaction not found after polling");
+  }
+
+  if (getResponse.status === "FAILED") {
+    throw new Error(
+      `Transaction failed: ${getResponse.resultXdr?.toXDR("base64")}`,
+    );
+  }
+
+  return result.hash;
 }
