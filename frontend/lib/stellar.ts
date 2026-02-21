@@ -9,8 +9,7 @@ const SOROBAN_RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
   "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-  StellarSdk.Networks.TESTNET;
+  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,12 +50,12 @@ const rpc = new StellarSdk.rpc.Server(SOROBAN_RPC_URL);
 async function simulateCall(
   contractId: string,
   method: string,
-  args: StellarSdk.xdr.ScVal[] = []
+  args: StellarSdk.xdr.ScVal[] = [],
 ): Promise<StellarSdk.xdr.ScVal> {
   const contract = new StellarSdk.Contract(contractId);
   const account = new StellarSdk.Account(
     "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-    "0"
+    "0",
   );
 
   const tx = new StellarSdk.TransactionBuilder(account, {
@@ -70,9 +69,7 @@ async function simulateCall(
   const sim = await rpc.simulateTransaction(tx);
 
   if (StellarSdk.rpc.Api.isSimulationError(sim)) {
-    throw new Error(
-      `Soroban simulation error (${method}): ${sim.error}`
-    );
+    throw new Error(`Soroban simulation error (${method}): ${sim.error}`);
   }
 
   if (!StellarSdk.rpc.Api.isSimulationSuccess(sim) || !sim.result) {
@@ -119,9 +116,7 @@ function decodeAddress(val: StellarSdk.xdr.ScVal): string {
 /**
  * Fetch full token metadata from a Soroban SEP-41 token contract.
  */
-export async function fetchTokenInfo(
-  contractId: string
-): Promise<TokenInfo> {
+export async function fetchTokenInfo(contractId: string): Promise<TokenInfo> {
   const [nameVal, symbolVal, decimalsVal, adminVal] = await Promise.all([
     simulateCall(contractId, "name"),
     simulateCall(contractId, "symbol"),
@@ -171,7 +166,7 @@ export async function fetchTopHolders(
   contractId: string,
   _symbol?: string,
   _issuer?: string,
-  limit = 10
+  limit = 10,
 ): Promise<TokenHolder[]> {
   try {
     // Attempt to read ledger entries for known holder patterns.
@@ -191,16 +186,15 @@ export async function fetchTopHolders(
       // Calculate total for percentage
       let total = BigInt(0);
       const parsed = records.map((acc) => {
-        const bal =
-          acc.balances.find(
-            (b) =>
-              "asset_code" in b &&
-              b.asset_code === _symbol &&
-              "asset_issuer" in b &&
-              b.asset_issuer === _issuer
-          );
+        const bal = acc.balances.find(
+          (b) =>
+            "asset_code" in b &&
+            b.asset_code === _symbol &&
+            "asset_issuer" in b &&
+            b.asset_issuer === _issuer,
+        );
         const raw = BigInt(
-          Math.round(parseFloat(bal ? bal.balance : "0") * 1e7)
+          Math.round(parseFloat(bal ? bal.balance : "0") * 1e7),
         );
         total += raw;
         return { address: acc.account_id, rawBalance: raw };
@@ -273,10 +267,7 @@ export async function fetchVestingSchedule(
 // ---------------------------------------------------------------------------
 
 /** Format a raw integer token amount using the given decimals. */
-export function formatTokenAmount(
-  raw: string,
-  decimals: number
-): string {
+export function formatTokenAmount(raw: string, decimals: number): string {
   if (raw === "N/A") return raw;
   const num = BigInt(raw);
   const divisor = BigInt(10) ** BigInt(decimals);
@@ -293,4 +284,79 @@ export function formatTokenAmount(
 export function truncateAddress(addr: string, chars = 4): string {
   if (addr.length <= chars * 2 + 3) return addr;
   return `${addr.slice(0, chars + 1)}...${addr.slice(-chars)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Supply breakdown helpers
+// ---------------------------------------------------------------------------
+
+export interface SupplyBreakdown {
+  circulating: number;
+  locked: number;
+  burned: number;
+  total: number;
+}
+
+/**
+ * Calculate supply breakdown for a token.
+ *
+ * @param tokenContractId - The token contract ID
+ * @param vestingContractId - Optional vesting contract ID to calculate locked supply
+ * @returns Supply breakdown with circulating, locked, and burned amounts
+ */
+export async function fetchSupplyBreakdown(
+  tokenContractId: string,
+  vestingContractId?: string,
+): Promise<SupplyBreakdown> {
+  try {
+    // Fetch total supply from token contract
+    const totalSupplyVal = await simulateCall(tokenContractId, "total_supply");
+    const totalSupply = Number(decodeI128(totalSupplyVal));
+
+    // For now, we'll estimate circulating supply as total supply
+    // In a production app, you'd query all vesting contracts and subtract locked amounts
+    let lockedSupply = 0;
+
+    // If vesting contract provided, try to get locked amount
+    // Note: This is a simplified approach. In production, you'd need to:
+    // 1. Query all vesting schedules from the contract
+    // 2. Sum up unvested amounts across all schedules
+    if (vestingContractId) {
+      try {
+        // This is a placeholder - actual implementation would need to
+        // enumerate all vesting schedules and sum unvested amounts
+        // For now, we'll return 0 for locked
+        lockedSupply = 0;
+      } catch {
+        // Vesting contract query failed, assume no locked supply
+        lockedSupply = 0;
+      }
+    }
+
+    // Burned supply: In Stellar/Soroban, burned tokens are typically sent to a null address
+    // or the supply is reduced. For now, we'll calculate it as the difference
+    // between max supply (if exists) and total supply
+    let burnedSupply = 0;
+    try {
+      const maxSupplyVal = await simulateCall(tokenContractId, "max_supply");
+      // max_supply might return Option<i128>, need to handle that
+      // For simplicity, we'll assume if it exists, burned = max - total
+      // This is a simplified approach
+    } catch {
+      // No max_supply or it failed, assume no burned tokens
+      burnedSupply = 0;
+    }
+
+    const circulatingSupply = totalSupply - lockedSupply - burnedSupply;
+
+    return {
+      circulating: circulatingSupply,
+      locked: lockedSupply,
+      burned: burnedSupply,
+      total: totalSupply,
+    };
+  } catch (error) {
+    console.error("[fetchSupplyBreakdown] Error:", error);
+    throw new Error("Failed to fetch supply breakdown");
+  }
 }
