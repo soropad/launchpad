@@ -177,9 +177,8 @@ function HoldersTable({ holders }: { holders: TokenHolder[] }) {
             {sorted.map((holder, i) => (
               <tr
                 key={holder.address}
-                className={`border-b border-white/5 transition-colors hover:bg-white/[0.02] ${
-                  i % 2 === 0 ? "bg-white/[0.01]" : ""
-                }`}
+                className={`border-b border-white/5 transition-colors hover:bg-white/[0.02] ${i % 2 === 0 ? "bg-white/[0.01]" : ""
+                  }`}
               >
                 <td className="px-4 py-3 font-mono text-xs text-stellar-300">
                   <span className="hidden sm:inline">{holder.address}</span>
@@ -210,6 +209,8 @@ function HoldersTable({ holders }: { holders: TokenHolder[] }) {
     </div>
   );
 }
+
+import ActivityFeed from "./ActivityFeed";
 
 // ---------------------------------------------------------------------------
 // Main dashboard component
@@ -304,6 +305,14 @@ export default function TokenDashboard({
           Vesting Schedule
         </h2>
         <VestingProgress decimals={tokenInfo.decimals} />
+      </section>
+
+      {/* Token Activity Feed */}
+      <section aria-label="Token activity feed" className="mt-10">
+        <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
+          Token Activity
+        </h2>
+        <ActivityFeed accountId={contractId} />
       </section>
     </div>
   );

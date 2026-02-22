@@ -29,7 +29,7 @@ function VestingDisplay({
   // Replicate the contract's cliff + linear vesting formula
   let vestedBig: bigint;
   if (currentLedger < schedule.cliffLedger) {
-    vestedBig = 0n;
+    vestedBig = BigInt(0);
   } else if (currentLedger >= schedule.endLedger) {
     vestedBig = totalBig;
   } else {
@@ -39,9 +39,9 @@ function VestingDisplay({
   }
 
   const vestedPercent =
-    totalBig > 0n ? Number((vestedBig * 10000n) / totalBig) / 100 : 0;
+    totalBig > BigInt(0) ? Number((vestedBig * BigInt(10000)) / totalBig) / 100 : 0;
   const releasedPercent =
-    totalBig > 0n ? Number((releasedBig * 10000n) / totalBig) / 100 : 0;
+    totalBig > BigInt(0) ? Number((releasedBig * BigInt(10000)) / totalBig) / 100 : 0;
 
   // Timeline cursor position (0–100 %)
   const range = schedule.endLedger - schedule.cliffLedger;
