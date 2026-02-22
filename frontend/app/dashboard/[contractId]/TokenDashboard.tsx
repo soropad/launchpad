@@ -3,12 +3,11 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { Copy, Check, ArrowUpDown, AlertCircle, Loader2 } from "lucide-react";
 import {
-  fetchTokenInfo,
-  fetchTopHolders,
   truncateAddress,
   type TokenInfo,
   type TokenHolder,
 } from "@/lib/stellar";
+import { useSoroban } from "@/hooks/useSoroban";
 import VestingProgress from "./VestingProgress";
 
 // ---------------------------------------------------------------------------
@@ -224,6 +223,7 @@ export default function TokenDashboard({
   const [holders, setHolders] = useState<TokenHolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { fetchTokenInfo, fetchTopHolders } = useSoroban();
 
   const loadData = useCallback(async () => {
     setLoading(true);

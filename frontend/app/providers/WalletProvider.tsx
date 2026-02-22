@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useNetwork } from "./NetworkProvider";
 import {
   isConnected as freighterIsConnected,
   isAllowed as freighterIsAllowed,
@@ -44,6 +45,7 @@ export const WalletContext = createContext<WalletContextValue | undefined>(
 
 /* ── Provider ─────────────────────────────────────────────────────── */
 export function WalletProvider({ children }: { children: ReactNode }) {
+  const { networkConfig } = useNetwork();
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -116,13 +118,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       xdr: string,
       opts?: { networkPassphrase?: string; address?: string },
     ): Promise<string> => {
-      const { signedTxXdr, error } = await freighterSignTransaction(xdr, opts);
+      const finalOpts = {
+        networkPassphrase: networkConfig.passphrase,
+        ...opts,
+      };
+      const { signedTxXdr, error } = await freighterSignTransaction(
+        xdr,
+        finalOpts,
+      );
       if (error) {
         throw new Error(error);
       }
       return signedTxXdr;
     },
-    [],
+    [networkConfig.passphrase],
   );
 
   /* ── Memoised value ───────────────────────────────────────────── */

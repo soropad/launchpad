@@ -3,12 +3,11 @@
 import { useState, useCallback } from "react";
 import { Loader2, AlertCircle, Clock, Unlock, Lock } from "lucide-react";
 import {
-  fetchVestingSchedule,
-  fetchCurrentLedger,
   formatTokenAmount,
   truncateAddress,
   type VestingScheduleInfo,
 } from "@/lib/stellar";
+import { useSoroban } from "@/hooks/useSoroban";
 
 // ---------------------------------------------------------------------------
 // Vesting display (progress bars + timeline)
@@ -29,7 +28,7 @@ function VestingDisplay({
   // Replicate the contract's cliff + linear vesting formula
   let vestedBig: bigint;
   if (currentLedger < schedule.cliffLedger) {
-    vestedBig = 0n;
+    vestedBig = BigInt(0);
   } else if (currentLedger >= schedule.endLedger) {
     vestedBig = totalBig;
   } else {
@@ -39,9 +38,9 @@ function VestingDisplay({
   }
 
   const vestedPercent =
-    totalBig > 0n ? Number((vestedBig * 10000n) / totalBig) / 100 : 0;
+    totalBig > BigInt(0) ? Number((vestedBig * BigInt(10000)) / totalBig) / 100 : 0;
   const releasedPercent =
-    totalBig > 0n ? Number((releasedBig * 10000n) / totalBig) / 100 : 0;
+    totalBig > BigInt(0) ? Number((releasedBig * BigInt(10000)) / totalBig) / 100 : 0;
 
   // Timeline cursor position (0–100 %)
   const range = schedule.endLedger - schedule.cliffLedger;
@@ -222,6 +221,7 @@ export default function VestingProgress({ decimals }: { decimals: number }) {
   const [currentLedger, setCurrentLedger] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { fetchVestingSchedule, fetchCurrentLedger } = useSoroban();
 
   const lookup = useCallback(async () => {
     if (!vestingContract.trim() || !recipient.trim()) return;

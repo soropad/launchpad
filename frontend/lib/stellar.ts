@@ -1,16 +1,5 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
-
-// ---------------------------------------------------------------------------
-// Config — defaults to Stellar Testnet
-// ---------------------------------------------------------------------------
-const HORIZON_URL =
-  process.env.NEXT_PUBLIC_HORIZON_URL ?? "https://horizon-testnet.stellar.org";
-const SOROBAN_RPC_URL =
-  process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
-  "https://soroban-testnet.stellar.org";
-const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-  StellarSdk.Networks.TESTNET;
+import { type NetworkConfig } from "../types/network";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,7 +32,6 @@ export interface VestingScheduleInfo {
 // ---------------------------------------------------------------------------
 // Soroban RPC helpers
 // ---------------------------------------------------------------------------
-const rpc = new StellarSdk.rpc.Server(SOROBAN_RPC_URL);
 
 /**
  * Simulate a read-only Soroban contract invocation and return the result xdr.
@@ -51,8 +39,10 @@ const rpc = new StellarSdk.rpc.Server(SOROBAN_RPC_URL);
 async function simulateCall(
   contractId: string,
   method: string,
+  config: NetworkConfig,
   args: StellarSdk.xdr.ScVal[] = []
 ): Promise<StellarSdk.xdr.ScVal> {
+  const rpc = new StellarSdk.rpc.Server(config.rpcUrl);
   const contract = new StellarSdk.Contract(contractId);
   const account = new StellarSdk.Account(
     "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
@@ -61,7 +51,7 @@ async function simulateCall(
 
   const tx = new StellarSdk.TransactionBuilder(account, {
     fee: "100",
-    networkPassphrase: NETWORK_PASSPHRASE,
+    networkPassphrase: config.passphrase,
   })
     .addOperation(contract.call(method, ...args))
     .setTimeout(30)
@@ -120,28 +110,24 @@ function decodeAddress(val: StellarSdk.xdr.ScVal): string {
  * Fetch full token metadata from a Soroban SEP-41 token contract.
  */
 export async function fetchTokenInfo(
-  contractId: string
+  contractId: string,
+  config: NetworkConfig
 ): Promise<TokenInfo> {
   const [nameVal, symbolVal, decimalsVal, adminVal] = await Promise.all([
-    simulateCall(contractId, "name"),
-    simulateCall(contractId, "symbol"),
-    simulateCall(contractId, "decimals"),
-    simulateCall(contractId, "admin").catch(() => null),
+    simulateCall(contractId, "name", config),
+    simulateCall(contractId, "symbol", config),
+    simulateCall(contractId, "decimals", config),
+    simulateCall(contractId, "admin", config).catch(() => null),
   ]);
 
   const decimals = decodeU32(decimalsVal);
 
-  // total_supply is not part of SEP-41 but many tokens implement it;
-  // fall back to "N/A" when unavailable.
   let totalSupply = "N/A";
   let circulatingSupply = "N/A";
   try {
-    const supplyVal = await simulateCall(contractId, "total_supply");
+    const supplyVal = await simulateCall(contractId, "total_supply", config);
     const rawSupply = decodeI128(supplyVal);
     totalSupply = formatTokenAmount(rawSupply, decimals);
-    // For Soroban tokens, circulating supply == total supply unless a
-    // treasury/burn mechanism is in place. Show the same value here;
-    // downstream dashboards can customise.
     circulatingSupply = totalSupply;
   } catch {
     // total_supply not implemented on this contract
@@ -159,25 +145,17 @@ export async function fetchTokenInfo(
 }
 
 /**
- * Fetch the top token holders by querying Horizon for accounts that hold
- * the given classic asset **or** by reading Soroban contract storage.
- *
- * Because Soroban tokens don't expose a native "list holders" method, we
- * query Horizon for the corresponding classic-wrapped asset first. If that
- * returns no results we return an empty list — a production indexer would
- * be needed for full Soroban-native holder enumeration.
+ * Fetch the top token holders.
  */
 export async function fetchTopHolders(
   contractId: string,
+  config: NetworkConfig,
   _symbol?: string,
   _issuer?: string,
   limit = 10
 ): Promise<TokenHolder[]> {
   try {
-    // Attempt to read ledger entries for known holder patterns.
-    // For a real product, this would use a Soroban indexer (e.g. Mercury).
-    // As a best-effort fallback, we query Horizon for the classic asset.
-    const horizon = new StellarSdk.Horizon.Server(HORIZON_URL);
+    const horizon = new StellarSdk.Horizon.Server(config.horizonUrl);
 
     if (_symbol && _issuer) {
       const asset = new StellarSdk.Asset(_symbol, _issuer);
@@ -188,7 +166,6 @@ export async function fetchTopHolders(
         .order("desc")
         .call();
 
-      // Calculate total for percentage
       let total = BigInt(0);
       const parsed = records.map((acc) => {
         const bal =
@@ -218,7 +195,6 @@ export async function fetchTopHolders(
 
     return [];
   } catch {
-    // Horizon query may fail for Soroban-only tokens — expected.
     return [];
   }
 }
@@ -227,7 +203,6 @@ export async function fetchTopHolders(
 // Vesting helpers
 // ---------------------------------------------------------------------------
 
-/** Extract a named field from a Soroban struct (ScVal map). */
 function getStructField(
   entries: StellarSdk.xdr.ScMapEntry[],
   name: string,
@@ -238,22 +213,24 @@ function getStructField(
 }
 
 /**
- * Fetch the current ledger sequence number from Soroban RPC.
+ * Fetch the current ledger sequence number.
  */
-export async function fetchCurrentLedger(): Promise<number> {
+export async function fetchCurrentLedger(config: NetworkConfig): Promise<number> {
+  const rpc = new StellarSdk.rpc.Server(config.rpcUrl);
   const result = await rpc.getLatestLedger();
   return result.sequence;
 }
 
 /**
- * Fetch a vesting schedule from a Soroban vesting contract.
+ * Fetch a vesting schedule.
  */
 export async function fetchVestingSchedule(
   vestingContractId: string,
   recipient: string,
+  config: NetworkConfig
 ): Promise<VestingScheduleInfo> {
   const recipientScVal = new StellarSdk.Address(recipient).toScVal();
-  const result = await simulateCall(vestingContractId, "get_schedule", [
+  const result = await simulateCall(vestingContractId, "get_schedule", config, [
     recipientScVal,
   ]);
 
@@ -272,7 +249,6 @@ export async function fetchVestingSchedule(
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-/** Format a raw integer token amount using the given decimals. */
 export function formatTokenAmount(
   raw: string,
   decimals: number
@@ -289,7 +265,6 @@ export function formatTokenAmount(
   return `${whole.toLocaleString()}.${fracStr}`;
 }
 
-/** Truncate a Stellar address for display: G...XXXX */
 export function truncateAddress(addr: string, chars = 4): string {
   if (addr.length <= chars * 2 + 3) return addr;
   return `${addr.slice(0, chars + 1)}...${addr.slice(-chars)}`;
