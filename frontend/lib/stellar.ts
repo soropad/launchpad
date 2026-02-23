@@ -609,3 +609,21 @@ export async function submitTransaction(signedXdr: string): Promise<string> {
 
   return result.hash;
 }
+
+// ---------------------------------------------------------------------------
+// Stellar Expert URL helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a Stellar Expert explorer URL for a contract ID or public key
+ */
+export function getStellarExpertUrl(address: string, type: 'contract' | 'account' | 'tx' = 'account'): string {
+  const network = 'mainnet'; // Default to mainnet
+  if (type === 'tx') {
+    return `https://stellar.expert/explorer/${network}/tx/${address}`;
+  }
+  if (type === 'contract') {
+    return `https://stellar.expert/explorer/${network}/contract/${address}`;
+  }
+  return `https://stellar.expert/explorer/${network}/account/${address}`;
+}

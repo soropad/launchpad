@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { Copy, Check, ArrowUpDown, AlertCircle, Loader2, Download } from "lucide-react";
 import {
   truncateAddress,
+  getStellarExpertUrl,
   type TokenInfo,
   type TokenHolder,
   type SupplyBreakdown,
@@ -204,8 +205,16 @@ function HoldersTable({ holders }: { holders: TokenHolder[] }) {
               >
                 <td className="px-4 py-3 font-mono text-xs text-stellar-300">
                   <div className="flex items-center gap-2">
-                    <span className="hidden sm:inline">{holder.address}</span>
-                    <span className="sm:hidden">{truncateAddress(holder.address, 6)}</span>
+                    <a
+                      href={getStellarExpertUrl(holder.address, 'account')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-stellar-300 hover:underline"
+                      title="View on Stellar Expert"
+                    >
+                      <span className="hidden sm:inline">{holder.address}</span>
+                      <span className="sm:hidden">{truncateAddress(holder.address, 6)}</span>
+                    </a>
                     <CopyButton value={holder.address} label="Copy wallet address" />
                   </div>
                 </td>
@@ -295,10 +304,16 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
           <span className="text-stellar-400">({tokenInfo.symbol})</span>
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-400">
-          <span className="font-mono text-xs">
+          <a
+            href={getStellarExpertUrl(contractId, 'contract')}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-xs text-stellar-400 hover:text-stellar-300 hover:underline"
+            title="View on Stellar Expert"
+          >
             <span className="hidden md:inline">{contractId}</span>
             <span className="md:hidden">{truncateAddress(contractId, 8)}</span>
-          </span>
+          </a>
           <CopyButton value={contractId} label="Copy contract ID" />
         </div>
       </div>
