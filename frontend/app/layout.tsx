@@ -18,6 +18,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000"
+  ),
   title: "SoroPad — Soroban Token Launchpad",
   description:
     "Deploy and manage SEP-41 compliant tokens on Stellar Soroban. No code required.",
