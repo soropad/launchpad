@@ -10,6 +10,17 @@ import { parseSorobanError, simulateTransaction } from "@/lib/transactionSimulat
 import { renderHook, act } from "@testing-library/react";
 import { useTransactionSimulator } from "@/hooks/useTransactionSimulator";
 
+// Mock useNetwork
+jest.mock("@/app/providers/NetworkProvider", () => ({
+  useNetwork: () => ({
+    networkConfig: {
+      rpcUrl: "https://soroban-testnet.stellar.org",
+      passphrase: "Test SDF Network ; September 2015",
+      network: "testnet",
+    },
+  }),
+}));
+
 // ───────────────────────────────────────────────────────────────────────────
 // Error Parsing Tests
 // ───────────────────────────────────────────────────────────────────────────
