@@ -39,6 +39,8 @@ const ERROR_MESSAGE_MAP: Record<string, string> = {
   "Invalid Stellar public key": "The provided Stellar address is not valid.",
   "max_supply must be positive": "Maximum supply must be greater than zero.",
   "initial_supply exceeds max_supply": "Initial supply cannot exceed maximum supply.",
+  "allowance would overflow": "Allowance amount is too large and would overflow.",
+  "approval would exceed max_supply": "Approval amount cannot exceed the token's maximum supply.",
 };
 
 /**
@@ -269,4 +271,61 @@ export async function simulateCreateSchedule(
   ];
 
   return simulateTransaction(vestingContractId, "create_schedule", args, config, adminAddress);
+}
+
+/**
+ * Simulate a token approve (allowance grant) pre-flight check.
+ */
+export async function simulateApprove(
+  contractId: string,
+  ownerAddress: string,
+  spenderAddress: string,
+  amount: bigint | string,
+  expirationLedger: number = 10000000,
+  config?: NetworkConfig,
+): Promise<PreflightCheckResult> {
+  if (!config) {
+    return {
+      success: false,
+      warnings: [],
+      errors: ["Network configuration is required"],
+    };
+  }
+
+  const args = [
+    new StellarSdk.Address(ownerAddress).toScVal(),
+    new StellarSdk.Address(spenderAddress).toScVal(),
+    StellarSdk.nativeToScVal(BigInt(amount), { type: "i128" }),
+    StellarSdk.nativeToScVal(BigInt(expirationLedger), { type: "u32" }),
+  ];
+
+  return simulateTransaction(contractId, "approve", args, config, ownerAddress);
+}
+
+/**
+ * Simulate a token revoke allowance pre-flight check.
+ * Revoke is implemented as approve with 0 amount.
+ */
+export async function simulateRevokeAllowance(
+  contractId: string,
+  ownerAddress: string,
+  spenderAddress: string,
+  config?: NetworkConfig,
+): Promise<PreflightCheckResult> {
+  if (!config) {
+    return {
+      success: false,
+      warnings: [],
+      errors: ["Network configuration is required"],
+    };
+  }
+
+  const args = [
+    new StellarSdk.Address(ownerAddress).toScVal(),
+    new StellarSdk.Address(spenderAddress).toScVal(),
+    StellarSdk.nativeToScVal(BigInt(0), { type: "i128" }),
+    StellarSdk.nativeToScVal(BigInt(1000), { type: "u32" }),
+  ];
+
+  return simulateTransaction(contractId, "approve", args, config, ownerAddress);
 }

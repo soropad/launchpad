@@ -11,6 +11,8 @@ import {
   simulateVestingRelease,
   simulateVestingRevoke,
   simulateCreateSchedule,
+  simulateApprove,
+  simulateRevokeAllowance,
   type PreflightCheckResult,
 } from "@/lib/transactionSimulator";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -172,6 +174,41 @@ export function useTransactionSimulator() {
           adminAddress,
           networkConfig,
         ),
+      );
+    },
+
+    /**
+     * Simulate an approve (grant allowance) operation
+     */
+    async checkApprove(
+      contractId: string,
+      ownerAddress: string,
+      spenderAddress: string,
+      amount: bigint | string,
+      expirationLedger?: number,
+    ): Promise<PreflightCheckResult> {
+      return runSimulation(() =>
+        simulateApprove(
+          contractId,
+          ownerAddress,
+          spenderAddress,
+          amount,
+          expirationLedger,
+          networkConfig,
+        ),
+      );
+    },
+
+    /**
+     * Simulate a revoke allowance operation
+     */
+    async checkRevokeAllowance(
+      contractId: string,
+      ownerAddress: string,
+      spenderAddress: string,
+    ): Promise<PreflightCheckResult> {
+      return runSimulation(() =>
+        simulateRevokeAllowance(contractId, ownerAddress, spenderAddress, networkConfig),
       );
     },
   };

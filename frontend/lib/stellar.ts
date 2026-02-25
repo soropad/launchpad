@@ -54,11 +54,33 @@ export interface VestingScheduleInfo {
   revoked: boolean;
 }
 
+export interface TokenAllowanceInfo {
+  spenderAddress: string;
+  amount: string;
+  expirationLedger: number;
+  isExpired: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Soroban RPC helpers
 // ---------------------------------------------------------------------------
 function getRpc() {
   return new StellarSdk.rpc.Server(getRpcUrl());
+}
+
+async function simulateAndAssembleTransaction(tx: StellarSdk.Transaction) {
+  const rpc = new StellarSdk.rpc.Server(getRpcUrl());
+  const simulated = await rpc.simulateTransaction(tx);
+
+  if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
+    throw new Error(`Simulation failed: ${simulated.error}`);
+  }
+
+  if (!StellarSdk.rpc.Api.isSimulationSuccess(simulated)) {
+    throw new Error("Transaction simulation was not successful");
+  }
+
+  return StellarSdk.rpc.assembleTransaction(tx, simulated);
 }
 
 /**
@@ -70,7 +92,6 @@ async function simulateCall(
   config: NetworkConfig,
   args: StellarSdk.xdr.ScVal[] = [],
 ): Promise<StellarSdk.xdr.ScVal> {
-  const rpc = new StellarSdk.rpc.Server(config.rpcUrl);
   const contract = new StellarSdk.Contract(contractId);
   const account = new StellarSdk.Account(
     "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
@@ -96,6 +117,96 @@ async function simulateCall(
   }
 
   return sim.result.retval;
+}
+
+export async function fetchTokenAllowance(
+  contractId: string,
+  ownerAddress: string,
+  spenderAddress: string,
+  config: NetworkConfig,
+): Promise<bigint> {
+  const args = [
+    new StellarSdk.Address(ownerAddress).toScVal(),
+    new StellarSdk.Address(spenderAddress).toScVal(),
+  ];
+  const allowanceVal = await simulateCall(contractId, "allowance", config, args);
+  return BigInt(decodeI128(allowanceVal));
+}
+
+export async function fetchApprovedSpendersFromEvents(params: {
+  contractId: string;
+  ownerAddress: string;
+  maxPages?: number;
+}): Promise<string[]> {
+  const { contractId, ownerAddress, maxPages = 5 } = params;
+
+  const rpc = new StellarSdk.rpc.Server(getRpcUrl());
+  const spenders = new Set<string>();
+
+  const getEvents = (rpc as unknown as { getEvents?: (req: unknown) => Promise<unknown> }).getEvents;
+  if (!getEvents) {
+    return [];
+  }
+
+  const readStringArray = (v: unknown): string[] | null => {
+    if (!Array.isArray(v)) return null;
+    if (!v.every((x) => typeof x === "string")) return null;
+    return v as string[];
+  };
+
+  // NOTE: This is best-effort. Not all RPC nodes retain unlimited history.
+  // We page a limited number of times to avoid expensive scans.
+  let cursor: string | undefined;
+
+  for (let page = 0; page < maxPages; page++) {
+    const response = await getEvents({
+      startLedger: 0,
+      filters: [
+        {
+          type: "contract",
+          contractIds: [contractId],
+        },
+      ],
+      pagination: {
+        limit: 200,
+        cursor,
+      },
+    });
+
+    const responseObj = (response ?? {}) as { events?: unknown; cursor?: unknown };
+    const events = Array.isArray(responseObj.events) ? responseObj.events : [];
+    if (events.length === 0) break;
+
+    for (const e of events) {
+      try {
+        const eventObj = (e ?? {}) as { topic?: unknown };
+        const topic = readStringArray(eventObj.topic) ?? [];
+        if (topic.length < 3) continue;
+
+        const topic0 = StellarSdk.xdr.ScVal.fromXDR(topic[0], "base64");
+        const topic1 = StellarSdk.xdr.ScVal.fromXDR(topic[1], "base64");
+        const topic2 = StellarSdk.xdr.ScVal.fromXDR(topic[2], "base64");
+
+        const symbol = decodeString(topic0);
+        if (symbol !== "approve") continue;
+
+        const from = decodeAddress(topic1);
+        const spender = decodeAddress(topic2);
+
+        if (from === ownerAddress) {
+          spenders.add(spender);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    }
+
+    const nextCursor = typeof responseObj.cursor === "string" ? responseObj.cursor : undefined;
+    if (!nextCursor || nextCursor === cursor) break;
+    cursor = nextCursor;
+  }
+
+  return Array.from(spenders);
 }
 
 /** Decode an ScVal string (symbol or string type). */
@@ -477,6 +588,43 @@ export function formatTokenAmount(raw: string, decimals: number): string {
   return `${whole.toLocaleString()}.${fracStr}`;
 }
 
+export function parseTokenAmount(amount: string, decimals: number): bigint {
+  const trimmed = amount.trim();
+  if (!trimmed) {
+    throw new Error("Amount is required");
+  }
+
+  if (trimmed.startsWith("-")) {
+    throw new Error("Amount must be positive");
+  }
+
+  const [wholeRaw, fracRaw = ""] = trimmed.split(".");
+  if (!/^\d+$/.test(wholeRaw || "0")) {
+    throw new Error("Invalid amount");
+  }
+  if (fracRaw && !/^\d+$/.test(fracRaw)) {
+    throw new Error("Invalid amount");
+  }
+
+  if (fracRaw.length > decimals) {
+    throw new Error(`Too many decimal places (max ${decimals})`);
+  }
+
+  const whole = BigInt(wholeRaw || "0");
+  const fracPadded = (fracRaw || "").padEnd(decimals, "0");
+  const frac = fracPadded ? BigInt(fracPadded) : BigInt(0);
+  const scale = BigInt(10) ** BigInt(decimals);
+  return whole * scale + frac;
+}
+
+export async function fetchTokenDecimals(
+  tokenContractId: string,
+  config: NetworkConfig,
+): Promise<number> {
+  const result = await simulateCall(tokenContractId, "decimals", config);
+  return decodeU32(result);
+}
+
 export function truncateAddress(addr: string, chars = 4): string {
   if (addr.length <= chars * 2 + 3) return addr;
   return `${addr.slice(0, chars + 1)}...${addr.slice(-chars)}`;
@@ -560,7 +708,7 @@ export async function fetchSupplyBreakdown(
     // between max supply (if exists) and total supply
     let burnedSupply = 0;
     try {
-      const maxSupplyVal = await simulateCall(
+      await simulateCall(
         tokenContractId,
         "max_supply",
         config,
@@ -616,20 +764,81 @@ export async function buildRevokeTransaction(
     .build();
 
   // Simulate to get resource fees
-  const rpc = new StellarSdk.rpc.Server(getRpcUrl());
-  const simulated = await rpc.simulateTransaction(tx);
+  const assembled = await simulateAndAssembleTransaction(tx);
+  return assembled.build().toXDR();
+}
 
-  if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
-    throw new Error(`Simulation failed: ${simulated.error}`);
-  }
+/**
+ * Build a transaction XDR for SEP-41 approve (grant/revoke allowance).
+ * Returns the unsigned transaction XDR string.
+ */
+export async function buildApproveTransaction(params: {
+  tokenContractId: string;
+  ownerAddress: string;
+  spenderAddress: string;
+  amount: bigint;
+  expirationLedger: number;
+}): Promise<string> {
+  const {
+    tokenContractId,
+    ownerAddress,
+    spenderAddress,
+    amount,
+    expirationLedger,
+  } = params;
 
-  if (!StellarSdk.rpc.Api.isSimulationSuccess(simulated)) {
-    throw new Error("Transaction simulation was not successful");
-  }
+  const contract = new StellarSdk.Contract(tokenContractId);
+  const ownerScVal = new StellarSdk.Address(ownerAddress).toScVal();
+  const spenderScVal = new StellarSdk.Address(spenderAddress).toScVal();
+  const amountScVal = StellarSdk.nativeToScVal(BigInt(amount), { type: "i128" });
+  const expirationScVal = StellarSdk.nativeToScVal(BigInt(expirationLedger), { type: "u32" });
 
-  // Assemble the transaction with simulation results
-  const assembled = StellarSdk.rpc.assembleTransaction(tx, simulated);
+  const horizon = new StellarSdk.Horizon.Server(getHorizonUrl());
+  const sourceAccount = await horizon.loadAccount(ownerAddress);
 
+  const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+    fee: StellarSdk.BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call("approve", ownerScVal, spenderScVal, amountScVal, expirationScVal))
+    .setTimeout(30)
+    .build();
+
+  const assembled = await simulateAndAssembleTransaction(tx);
+  return assembled.build().toXDR();
+}
+
+/**
+ * Build a transaction XDR for SEP-41 transfer_from.
+ * Returns the unsigned transaction XDR string.
+ */
+export async function buildTransferFromTransaction(params: {
+  tokenContractId: string;
+  spenderAddress: string;
+  fromAddress: string;
+  toAddress: string;
+  amount: bigint;
+}): Promise<string> {
+  const { tokenContractId, spenderAddress, fromAddress, toAddress, amount } = params;
+
+  const contract = new StellarSdk.Contract(tokenContractId);
+  const spenderScVal = new StellarSdk.Address(spenderAddress).toScVal();
+  const fromScVal = new StellarSdk.Address(fromAddress).toScVal();
+  const toScVal = new StellarSdk.Address(toAddress).toScVal();
+  const amountScVal = StellarSdk.nativeToScVal(BigInt(amount), { type: "i128" });
+
+  const horizon = new StellarSdk.Horizon.Server(getHorizonUrl());
+  const sourceAccount = await horizon.loadAccount(spenderAddress);
+
+  const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+    fee: StellarSdk.BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call("transfer_from", spenderScVal, fromScVal, toScVal, amountScVal))
+    .setTimeout(30)
+    .build();
+
+  const assembled = await simulateAndAssembleTransaction(tx);
   return assembled.build().toXDR();
 }
 
