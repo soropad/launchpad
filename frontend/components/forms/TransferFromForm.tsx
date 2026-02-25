@@ -145,60 +145,38 @@ export function TransferFromForm({ onSuccess, onError }: TransferFromFormProps) 
       </div>
 
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Token Contract ID
-          </label>
-          <Input
-            {...register("tokenContractId")}
-            placeholder="C..."
-            className="font-mono text-sm"
-          />
-          {errors.tokenContractId && (
-            <p className="text-xs text-red-400 mt-1">{errors.tokenContractId.message}</p>
-          )}
-        </div>
+        <Input
+          label="Token Contract ID"
+          {...register("tokenContractId")}
+          placeholder="C..."
+          className="font-mono text-sm"
+          error={errors.tokenContractId?.message}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Source Address (who gave you allowance)
-          </label>
-          <Input
-            {...register("fromAddress")}
-            placeholder="G..."
-            className="font-mono text-sm"
-          />
-          {errors.fromAddress && (
-            <p className="text-xs text-red-400 mt-1">{errors.fromAddress.message}</p>
-          )}
-        </div>
+        <Input
+          label="Source Address (who gave you allowance)"
+          {...register("fromAddress")}
+          placeholder="G..."
+          className="font-mono text-sm"
+          error={errors.fromAddress?.message}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Recipient Address
-          </label>
-          <Input
-            {...register("toAddress")}
-            placeholder="G..."
-            className="font-mono text-sm"
-          />
-          {errors.toAddress && (
-            <p className="text-xs text-red-400 mt-1">{errors.toAddress.message}</p>
-          )}
-        </div>
+        <Input
+          label="Recipient Address"
+          {...register("toAddress")}
+          placeholder="G..."
+          className="font-mono text-sm"
+          error={errors.toAddress?.message}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Amount</label>
-          <Input
-            {...register("amount")}
-            placeholder="0.00"
-            type="number"
-            step="0.01"
-          />
-          {errors.amount && (
-            <p className="text-xs text-red-400 mt-1">{errors.amount.message}</p>
-          )}
-        </div>
+        <Input
+          label="Amount"
+          {...register("amount")}
+          placeholder="0.00"
+          type="number"
+          step="0.01"
+          error={errors.amount?.message}
+        />
       </div>
 
       {preflightResult && (

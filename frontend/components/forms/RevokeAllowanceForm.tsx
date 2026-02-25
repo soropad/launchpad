@@ -131,33 +131,21 @@ export function RevokeAllowanceForm({ onSuccess, onError }: RevokeAllowanceFormP
       </div>
 
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Token Contract ID
-          </label>
-          <Input
-            {...register("tokenContractId")}
-            placeholder="C..."
-            className="font-mono text-sm"
-          />
-          {errors.tokenContractId && (
-            <p className="text-xs text-red-400 mt-1">{errors.tokenContractId.message}</p>
-          )}
-        </div>
+        <Input
+          label="Token Contract ID"
+          {...register("tokenContractId")}
+          placeholder="C..."
+          className="font-mono text-sm"
+          error={errors.tokenContractId?.message}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Spender Address
-          </label>
-          <Input
-            {...register("spenderAddress")}
-            placeholder="G..."
-            className="font-mono text-sm"
-          />
-          {errors.spenderAddress && (
-            <p className="text-xs text-red-400 mt-1">{errors.spenderAddress.message}</p>
-          )}
-        </div>
+        <Input
+          label="Spender Address"
+          {...register("spenderAddress")}
+          placeholder="G..."
+          className="font-mono text-sm"
+          error={errors.spenderAddress?.message}
+        />
       </div>
 
       {preflightResult && (

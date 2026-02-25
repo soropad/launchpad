@@ -149,62 +149,40 @@ export function ApproveForm({ onSuccess, onError }: ApproveFormProps) {
       </div>
 
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Token Contract ID
-          </label>
-          <Input
-            {...register("tokenContractId")}
-            placeholder="C..."
-            className="font-mono text-sm"
-          />
-          {errors.tokenContractId && (
-            <p className="text-xs text-red-400 mt-1">{errors.tokenContractId.message}</p>
-          )}
-        </div>
+        <Input
+          label="Token Contract ID"
+          {...register("tokenContractId")}
+          placeholder="C..."
+          className="font-mono text-sm"
+          error={errors.tokenContractId?.message}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Spender Address
-          </label>
-          <Input
-            {...register("spenderAddress")}
-            placeholder="G..."
-            className="font-mono text-sm"
-          />
-          {errors.spenderAddress && (
-            <p className="text-xs text-red-400 mt-1">{errors.spenderAddress.message}</p>
-          )}
-        </div>
+        <Input
+          label="Spender Address"
+          {...register("spenderAddress")}
+          placeholder="G..."
+          className="font-mono text-sm"
+          error={errors.spenderAddress?.message}
+        />
 
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Amount</label>
-            <Input
-              {...register("amount")}
-              placeholder="0.00"
-              type="number"
-              step="0.01"
-            />
-            {errors.amount && (
-              <p className="text-xs text-red-400 mt-1">{errors.amount.message}</p>
-            )}
-          </div>
+          <Input
+            label="Amount"
+            {...register("amount")}
+            placeholder="0.00"
+            type="number"
+            step="0.01"
+            error={errors.amount?.message}
+          />
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Expiration (Days)
-            </label>
-            <Input
-              {...register("expirationDays")}
-              placeholder="365"
-              type="number"
-              min="0"
-            />
-            {errors.expirationDays && (
-              <p className="text-xs text-red-400 mt-1">{errors.expirationDays.message}</p>
-            )}
-          </div>
+          <Input
+            label="Expiration (Days)"
+            {...register("expirationDays")}
+            placeholder="365"
+            type="number"
+            min="0"
+            error={errors.expirationDays?.message}
+          />
         </div>
       </div>
 
