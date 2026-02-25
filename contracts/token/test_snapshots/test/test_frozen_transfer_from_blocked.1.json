@@ -546,7 +546,8 @@
                     "hi": 0,
                     "lo": 10000000000000
                   }
-                }
+                },
+                "void"
               ]
             }
           }
@@ -574,6 +575,26 @@
                 "hi": 0,
                 "lo": 10000000000000
               }
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "init"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
             }
           }
         }
@@ -909,7 +930,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'account is frozen' from contract function 'Symbol(obj#117)'"
+                  "string": "caught panic 'account is frozen' from contract function 'Symbol(obj#123)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"

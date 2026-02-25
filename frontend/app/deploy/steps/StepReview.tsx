@@ -1,20 +1,21 @@
 import { Control, useWatch } from "react-hook-form";
+import { DeployFormData } from "../DeployForm";
 
 interface StepProps {
-    control: Control<any>;
+    control: Control<DeployFormData>;
 }
+
+const SummaryItem = ({ label, value }: { label: string; value: string | number | undefined }) => (
+    <div className="flex justify-between py-2 border-b border-white/5">
+        <span className="text-gray-400 text-sm">{label}</span>
+        <span className="text-white font-medium truncate ml-4 max-w-[200px]">
+            {value || <span className="text-gray-600 italic">Not set</span>}
+        </span>
+    </div>
+);
 
 export const StepReview = ({ control }: StepProps) => {
     const formData = useWatch({ control });
-
-    const SummaryItem = ({ label, value }: { label: string; value: string | number | undefined }) => (
-        <div className="flex justify-between py-2 border-b border-white/5">
-            <span className="text-gray-400 text-sm">{label}</span>
-            <span className="text-white font-medium truncate ml-4 max-w-[200px]">
-                {value || <span className="text-gray-600 italic">Not set</span>}
-            </span>
-        </div>
-    );
 
     return (
         <div className="space-y-6 animate-fade-in-up">

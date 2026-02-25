@@ -496,6 +496,7 @@ mod test {
             &String::from_str(&env, "TestToken"),
             &String::from_str(&env, "TST"),
             &0i128,
+            &None,
         );
 
         // Remove mock — only user will auth, not admin.

@@ -10,6 +10,7 @@ import {
   type TokenHolder,
 } from "@/lib/stellar";
 import VestingProgress from "./VestingProgress";
+import TransactionHistory from "./TransactionHistory";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -177,9 +178,8 @@ function HoldersTable({ holders }: { holders: TokenHolder[] }) {
             {sorted.map((holder, i) => (
               <tr
                 key={holder.address}
-                className={`border-b border-white/5 transition-colors hover:bg-white/[0.02] ${
-                  i % 2 === 0 ? "bg-white/[0.01]" : ""
-                }`}
+                className={`border-b border-white/5 transition-colors hover:bg-white/[0.02] ${i % 2 === 0 ? "bg-white/[0.01]" : ""
+                  }`}
               >
                 <td className="px-4 py-3 font-mono text-xs text-stellar-300">
                   <span className="hidden sm:inline">{holder.address}</span>
@@ -304,6 +304,15 @@ export default function TokenDashboard({
           Vesting Schedule
         </h2>
         <VestingProgress decimals={tokenInfo.decimals} />
+      </section>
+
+      {/* Transaction History */}
+      <section aria-label="Transaction history" className="mt-16 border-t border-white/5 pt-10">
+        <TransactionHistory
+          contractId={contractId}
+          decimals={tokenInfo.decimals}
+          symbol={tokenInfo.symbol}
+        />
       </section>
     </div>
   );

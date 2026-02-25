@@ -1,9 +1,10 @@
 import { UseFormRegister, FieldErrors } from "react-hook-form";
 import { Input } from "@/components/ui/Input";
+import { DeployFormData } from "../DeployForm";
 
 interface StepProps {
-    register: UseFormRegister<any>;
-    errors: FieldErrors<any>;
+    register: UseFormRegister<DeployFormData>;
+    errors: FieldErrors<DeployFormData>;
 }
 
 export const StepMetadata = ({ register, errors }: StepProps) => {
