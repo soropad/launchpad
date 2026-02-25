@@ -69,9 +69,10 @@ export default function RootLayout({
                 · MIT License
               </p>
             </footer>
-          </WalletProvider>
+            </WalletProvider>
+          </SettingsProvider>
         </NetworkProvider>
-        </SettingsProvider>
+
       </body>
     </html>
   );
