@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { parseTokenAmount } from "@/lib/stellar";
 import { useWallet } from "../../../hooks/useWallet";
 import { useSoroban } from "@/hooks/useSoroban";
 import { useNetwork } from "@/app/providers/NetworkProvider";
@@ -186,10 +187,8 @@ export function TransferPanel({
       const StellarSdk = await import("@stellar/stellar-sdk");
       const rpc = new StellarSdk.rpc.Server(networkConfig.rpcUrl);
 
-      // Convert amount to raw value (with decimals)
-      const rawAmount =
-        BigInt(Math.floor(parseFloat(data.amount) * 10 ** tokenDecimals)) *
-        BigInt(10 ** Math.max(0, 7 - tokenDecimals));
+      // Convert the display amount to the token's raw unit precision.
+      const rawAmount = parseTokenAmount(data.amount, tokenDecimals);
 
       // Build transaction
       const account = await rpc.getAccount(publicKey);

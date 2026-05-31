@@ -133,6 +133,7 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
       {publicKey && tokenInfo.admin === publicKey && (
         <AdminPanel
           contractId={contractId}
+          decimals={tokenInfo.decimals}
           maxSupply={tokenInfo.maxSupply}
           totalSupply={tokenInfo.totalSupply}
         />
