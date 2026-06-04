@@ -234,8 +234,12 @@ export async function simulateVestingRelease(
   vestingContractId: string,
   recipientAddress: string,
   config: NetworkConfig,
+  scheduleIndex?: number,
 ): Promise<PreflightCheckResult> {
   const args = [new StellarSdk.Address(recipientAddress).toScVal()];
+  if (scheduleIndex !== undefined) {
+    args.push(StellarSdk.nativeToScVal(BigInt(scheduleIndex), { type: "u32" }));
+  }
 
   return simulateTransaction(vestingContractId, "release", args, config);
 }
@@ -248,8 +252,12 @@ export async function simulateVestingRevoke(
   recipientAddress: string,
   adminAddress: string,
   config: NetworkConfig,
+  scheduleIndex?: number,
 ): Promise<PreflightCheckResult> {
   const args = [new StellarSdk.Address(recipientAddress).toScVal()];
+  if (scheduleIndex !== undefined) {
+    args.push(StellarSdk.nativeToScVal(BigInt(scheduleIndex), { type: "u32" }));
+  }
 
   return simulateTransaction(vestingContractId, "revoke", args, config, adminAddress);
 }
@@ -401,9 +409,6 @@ export async function simulateTokenDeployment(
         const totalFee = (minResourceFee + baseFee) / 10_000_000;
         estimatedFee = totalFee >= 1 ? totalFee.toFixed(2) : totalFee.toFixed(4);
         simulationCost = estimatedFee;
-        if (sim.transactionData?.footprint) {
-          simulationFootprint = sim.transactionData.footprint.toString();
-        }
       } catch {
         estimatedFee = "0.01";
       }

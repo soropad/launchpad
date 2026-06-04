@@ -8,7 +8,10 @@ import { ExplorerLink } from "@/components/ui/ExplorerLink";
 type SortField = "address" | "balance" | "sharePercent";
 type SortDir = "asc" | "desc";
 
-export function exportHoldersCsv(holders: TokenHolder[]) {
+export function exportHoldersCsv(
+  holders: TokenHolder[],
+  label: string = "holders",
+) {
   const header = "Address,Balance,Share %";
   const rows = holders.map(
     (h) => `${h.address},${h.balance},${h.sharePercent.toFixed(2)}`,
@@ -19,7 +22,7 @@ export function exportHoldersCsv(holders: TokenHolder[]) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "top_holders.csv";
+  link.download = `${label}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -83,7 +86,6 @@ export function HoldersTable({
 
   // Reset to page 1 when search changes
   useEffect(() => {
-     
     setCurrentPage(1);
   }, [searchQuery]);
 
@@ -103,30 +105,61 @@ export function HoldersTable({
 
   return (
     <div className="space-y-4">
-      {/* Search bar */}
+      {/* Search bar and Export */}
       <div className="glass-card p-4">
-        <div className="relative">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by wallet address..."
-            className="w-full rounded-lg border border-white/10 bg-void-800 px-4 py-2 pl-10 text-sm text-white placeholder-gray-500 outline-none focus:border-stellar-500 focus:ring-1 focus:ring-stellar-500"
-            aria-label="Search holders by address"
-          />
-          <svg
-            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by wallet address..."
+              className="w-full rounded-lg border border-white/10 bg-void-800 px-4 py-2 pl-10 text-sm text-white placeholder-gray-500 outline-none focus:border-stellar-500 focus:ring-1 focus:ring-stellar-500"
+              aria-label="Search holders by address"
             />
-          </svg>
+            <svg
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+          </div>
+          <button
+            onClick={() =>
+              exportHoldersCsv(
+                paginatedHolders,
+                searchQuery ? "filtered_holders" : "current_page_holders",
+              )
+            }
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition-colors hover:border-stellar-400/30 hover:bg-stellar-500/10 hover:text-stellar-300 whitespace-nowrap"
+            title={
+              searchQuery
+                ? `Export ${paginatedHolders.length} filtered holders on this page`
+                : `Export ${paginatedHolders.length} holders on this page`
+            }
+          >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            Export Page ({paginatedHolders.length})
+          </button>
         </div>
         {searchQuery && (
           <p className="mt-2 text-xs text-gray-400">

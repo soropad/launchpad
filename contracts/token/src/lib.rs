@@ -25,11 +25,10 @@ pub enum DataKey {
     ContractUri,
     Balance(Address),
     Allowance(Address, Address), // (owner, spender)
-    Nonce(Address),              // For permit functionality
     Frozen(Address),
     IsPaused,
     /// Set to `true` after `revoke_admin` is called. Once locked, no admin
-    /// operation (mint, burn_admin, freeze, set_admin, propose_admin) can
+    /// operation (mint, burn_admin, freeze, propose_admin) can
     /// ever succeed again — the token becomes effectively immutable.
     Locked,
     AuthorizationRequired,
@@ -230,20 +229,11 @@ impl TokenContract {
         env.storage().instance().remove(&DataKey::PendingAdmin);
     }
 
-    /// Transfer admin role instantly.
-    /// TODO (issue #2): replace with two-step propose_admin / accept_admin.
-    pub fn set_admin(env: Env, new_admin: Address) {
-        Self::_require_admin(&env);
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
-        env.events()
-            .publish((symbol_short!("set_admin"),), new_admin);
-    }
-
     /// Permanently revoke the admin role and lock the contract.
     ///
     /// After this call:
     /// - No further `mint`, `burn_admin`, `freeze`, `unfreeze`,
-    ///   `set_admin`, `propose_admin`, `accept_admin`, `pause`, or
+    ///   `propose_admin`, `accept_admin`, `pause`, or
     ///   `unpause` operation can ever succeed.
     /// - The Admin storage entry is removed and a `Locked` flag is set.
     /// - `is_locked()` returns `true` from then on.
@@ -266,7 +256,7 @@ impl TokenContract {
         env.storage()
             .persistent()
             .set(&DataKey::Frozen(addr.clone()), &true);
-        env.events().publish((symbol_short!("freeze"), addr), true);
+        env.events().publish((symbol_short!("freeze"), addr), ());
     }
 
     /// Unfreeze a previously frozen account. Admin only.
@@ -275,7 +265,7 @@ impl TokenContract {
         env.storage()
             .persistent()
             .remove(&DataKey::Frozen(addr.clone()));
-        env.events().publish((symbol_short!("freeze"), addr), false);
+        env.events().publish((symbol_short!("unfreeze"), addr), ());
     }
 
     /// Pause the contract, halting all state-changing operations. Admin only.
@@ -371,8 +361,10 @@ impl TokenContract {
             new_wasm_hash != BytesN::from_array(&env, &[0; 32]),
             "invalid wasm hash"
         );
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
-        env.events().publish((symbol_short!("upgrade"),), true);
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.events()
+            .publish((symbol_short!("upgrade"),), new_wasm_hash);
     }
 
     // ── Token operations ────────────────────────────────────────────────
@@ -434,78 +426,6 @@ impl TokenContract {
 
         env.events()
             .publish((symbol_short!("approve"), from, spender), amount);
-    }
-
-    /// Permit function allowing off-chain signature-based approvals (similar to EIP-2612).
-    /// This allows users to sign an approval off-chain, and a relayer or spender can
-    /// submit this signature to gain allowance without requiring an on-chain approve transaction.
-    ///
-    /// Note: This is a simplified implementation. In production, proper cryptographic
-    /// signature verification should be implemented.
-    pub fn permit(
-        env: Env,
-        owner: Address,
-        spender: Address,
-        amount: i128,
-        expiration_ledger: u32,
-        nonce: u64,
-        _signature: BytesN<64>, // Signature parameter for future implementation
-    ) {
-        assert!(amount >= 0, "amount must be non-negative");
-
-        // Check that the permit hasn't expired
-        let current_ledger = env.ledger().sequence();
-        assert!(expiration_ledger >= current_ledger, "permit expired");
-
-        // Get and verify nonce
-        let nonce_key = DataKey::Nonce(owner.clone());
-        let current_nonce: u64 = env.storage().persistent().get(&nonce_key).unwrap_or(0);
-        assert!(nonce == current_nonce, "invalid nonce");
-
-        // Increment nonce to prevent replay attacks
-        env.storage()
-            .persistent()
-            .set(&nonce_key, &(current_nonce + 1));
-
-        // TODO: In a production implementation, verify the signature here
-        // This would involve:
-        // 1. Creating a standardized message format
-        // 2. Hashing the message
-        // 3. Verifying the signature against the owner's public key
-
-        // For now, we require the owner to authorize this call
-        // This provides security while we implement proper signature verification
-        owner.require_auth();
-
-        // Set the allowance
-        let allowance_key = DataKey::Allowance(owner.clone(), spender.clone());
-        env.storage().persistent().set(&allowance_key, &amount);
-
-        // Extend TTL for the allowance key
-        let ttl_ledgers = if expiration_ledger > current_ledger {
-            expiration_ledger - current_ledger
-        } else {
-            // Default TTL: 52 weeks in ledgers (assuming 5-second ledgers)
-            52 * 7 * 24 * 60 / 5
-        };
-
-        env.storage()
-            .persistent()
-            .extend_ttl(&allowance_key, ttl_ledgers, ttl_ledgers);
-
-        // Extend TTL for nonce key
-        env.storage()
-            .persistent()
-            .extend_ttl(&nonce_key, ttl_ledgers, ttl_ledgers);
-
-        env.events()
-            .publish((symbol_short!("permit"), owner, spender), amount);
-    }
-
-    /// Get the current nonce for an address (used for permit functionality)
-    pub fn nonce(env: Env, owner: Address) -> u64 {
-        let key = DataKey::Nonce(owner);
-        env.storage().persistent().get(&key).unwrap_or(0)
     }
 
     /// Transfer `amount` from `from` to `to` using `spender`'s allowance.
@@ -652,6 +572,21 @@ impl TokenContract {
 
         env.events()
             .publish((symbol_short!("set_max_b"),), max_balance_per_account);
+    }
+
+    /// Set, update, or remove the optional compliance node address.
+    /// Admin only. Pass `None` to remove the compliance node.
+    pub fn set_compliance_node(env: Env, node: Option<Address>) {
+        Self::_require_admin(&env);
+
+        if let Some(addr) = node.clone() {
+            env.storage().instance().set(&DataKey::ComplianceNode, &addr);
+        } else {
+            env.storage().instance().remove(&DataKey::ComplianceNode);
+        }
+
+        env.events()
+            .publish((symbol_short!("set_compliance_node"),), node);
     }
 
     /// Returns `true` if the contract is currently paused.
@@ -1239,100 +1174,6 @@ mod test {
     }
 
     #[test]
-    fn test_permit_functionality() {
-        let (env, client, admin, _user) = setup();
-        let spender = Address::generate(&env);
-
-        // Check initial nonce is 0
-        assert_eq!(client.nonce(&admin), 0);
-
-        // Create permit parameters
-        let amount = 100_0000000i128;
-        let expiration_ledger = env.ledger().sequence() + 1000;
-        let nonce = 0u64;
-
-        // Create a mock signature (64 bytes of zeros)
-        let signature = BytesN::from_array(&env, &[0u8; 64]);
-
-        // Test permit functionality
-        // Note: This will require auth from the owner since we haven't implemented
-        // full signature verification yet
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &nonce,
-            &signature,
-        );
-
-        // Check that allowance was set
-        assert_eq!(client.allowance(&admin, &spender), amount);
-
-        // Check that nonce was incremented
-        assert_eq!(client.nonce(&admin), 1);
-    }
-
-    #[test]
-    fn test_permit_nonce_validation() {
-        let (env, client, admin, _user) = setup();
-        let spender = Address::generate(&env);
-
-        // Test that nonce getter works correctly
-        assert_eq!(client.nonce(&admin), 0);
-
-        // Test with another user
-        let another_user = Address::generate(&env);
-        assert_eq!(client.nonce(&another_user), 0); // Should be 0 for new addresses
-
-        // Create permit to increment nonce
-        let amount = 50_0000000i128;
-        let expiration_ledger = env.ledger().sequence() + 1000;
-        let signature = BytesN::from_array(&env, &[0u8; 64]);
-
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &0u64,
-            &signature,
-        );
-        assert_eq!(client.nonce(&admin), 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid nonce")]
-    fn test_permit_invalid_nonce() {
-        let (env, client, admin, _user) = setup();
-        let spender = Address::generate(&env);
-
-        let amount = 50_0000000i128;
-        let expiration_ledger = env.ledger().sequence() + 1000;
-        let signature = BytesN::from_array(&env, &[0u8; 64]);
-
-        // First permit with nonce 0 should work
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &0u64,
-            &signature,
-        );
-
-        // Second permit with same nonce should fail
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &0u64,
-            &signature,
-        );
-    }
-
-    #[test]
     fn test_propose_and_accept_admin() {
         let (_, client, _, user) = setup();
         client.propose_admin(&user);
@@ -1434,15 +1275,6 @@ mod test {
         let (_, client, admin, _) = setup();
         client.revoke_admin();
         client.burn_admin(&admin, &1i128);
-    }
-
-    #[test]
-    #[should_panic(expected = "admin revoked: contract is locked")]
-    fn test_set_admin_after_revoke_panics() {
-        let (env, client, _, _) = setup();
-        let other = Address::generate(&env);
-        client.revoke_admin();
-        client.set_admin(&other);
     }
 
     #[test]
@@ -1924,5 +1756,50 @@ mod test {
         // Supply a valid future expiration; the allowance should be stored correctly.
         client.approve(&admin, &spender, &500i128, &100u32);
         assert_eq!(client.allowance(&admin, &spender), 500i128);
+    }
+
+    #[test]
+    fn test_set_and_remove_compliance_node() {
+        let (env, client, _, _) = setup();
+        let node = Address::generate(&env);
+
+        client.set_compliance_node(&Some(node.clone()));
+        assert_eq!(client.compliance_node(), Some(node.clone()));
+
+        client.set_compliance_node(&None);
+        assert_eq!(client.compliance_node(), None);
+    }
+
+    #[test]
+    fn test_freeze_unfreeze_events() {
+        let (env, client, _admin, user) = setup();
+
+        client.freeze_account(&user);
+        let events = env.events().all();
+        let last_event = events.get(events.len() - 1).unwrap();
+        
+        // Verify freeze event
+        assert_eq!(
+            last_event,
+            (
+                client.address.clone(),
+                (symbol_short!("freeze"), user.clone()).into_val(&env),
+                ().into_val(&env)
+            )
+        );
+
+        client.unfreeze_account(&user);
+        let events = env.events().all();
+        let last_event = events.get(events.len() - 1).unwrap();
+        
+        // Verify unfreeze event
+        assert_eq!(
+            last_event,
+            (
+                client.address.clone(),
+                (symbol_short!("unfreeze"), user.clone()).into_val(&env),
+                ().into_val(&env)
+            )
+        );
     }
 }

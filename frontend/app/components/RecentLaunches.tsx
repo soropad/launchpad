@@ -33,6 +33,12 @@ export function RecentLaunches() {
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
       setTokens(Array.isArray(data) ? data : []);
+
+      // Check if Mercury is not configured
+      const mercuryNote = res.headers.get("X-Note");
+      if (mercuryNote && data.length === 0) {
+        setError(null); // Clear error, show empty state instead
+      }
     } catch {
       setError("Unable to load recent launches.");
     } finally {
@@ -69,9 +75,9 @@ export function RecentLaunches() {
       )}
 
       {!loading && !error && tokens.length === 0 && (
-        <EmptyState 
-          title="No tokens launched recently"
-          description="Be the first to launch a token on the network! It's fast, secure, and ready for your project."
+        <EmptyState
+          title="No recent launches available"
+          description="Recent token launches require an indexer to be configured. You can still deploy and manage tokens using the dashboard."
           actionLabel="Deploy a Token"
           actionHref="/deploy"
         />

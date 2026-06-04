@@ -5,7 +5,7 @@ import { useNetwork } from "../providers/NetworkProvider";
 import { WalletButton } from "./WalletButton";
 import { SettingsModal } from "./SettingsModal";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-// import { NotificationCenter } from "./NotificationCenter";
+import { NotificationCenter } from "./NotificationCenter";
 import { Globe, ChevronDown, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -57,6 +57,7 @@ export function Navbar() {
           <div className="hidden items-center gap-2 md:flex md:gap-3">
             <LanguageSwitcher />
             <NetworkSwitcher />
+            <NotificationCenter />
             <SettingsModal />
           </div>
 
@@ -68,7 +69,9 @@ export function Navbar() {
             onClick={() => setMobileMenuOpen((prev) => !prev)}
             className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-white md:hidden"
             aria-label={
-              mobileMenuOpen ? accessibility("closeMenu") : accessibility("openMenu")
+              mobileMenuOpen
+                ? accessibility("closeMenu")
+                : accessibility("openMenu")
             }
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-menu"
@@ -115,7 +118,9 @@ export function Navbar() {
                 <NetworkSwitcher />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">{common("settings")}</span>
+                <span className="text-xs text-gray-500">
+                  {common("settings")}
+                </span>
                 <SettingsModal />
               </div>
             </div>

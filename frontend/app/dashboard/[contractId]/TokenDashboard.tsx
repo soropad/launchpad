@@ -21,7 +21,11 @@ import { AdminPanel } from "./components/AdminPanel";
 import { useWallet } from "@/app/hooks/useWallet";
 import { HoldersTable, exportHoldersCsv } from "./components/HoldersTable";
 import { InfoCard } from "./components/InfoCard";
-import { ErrorState, LoadingState, NotATokenState } from "./components/DashboardUi";
+import {
+  ErrorState,
+  LoadingState,
+  NotATokenState,
+} from "./components/DashboardUi";
 
 // ---------------------------------------------------------------------------
 // Main dashboard component
@@ -36,11 +40,8 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { publicKey } = useWallet();
-  const {
-    fetchTokenInfo,
-    fetchTopHolders,
-    fetchSupplyBreakdown,
-  } = useSoroban();
+  const { fetchTokenInfo, fetchTopHolders, fetchSupplyBreakdown } =
+    useSoroban();
   console.log(tokenInfo);
 
   const loadData = useCallback(async () => {
@@ -78,8 +79,7 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
     loadData();
   }, [loadData]);
 
-  const isInvalidToken =
-    error?.startsWith("Invalid token contract:") ?? false;
+  const isInvalidToken = error?.startsWith("Invalid token contract:") ?? false;
 
   if (loading) return <LoadingState />;
   if (isInvalidToken) return <NotATokenState contractId={contractId} />;
@@ -95,7 +95,9 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
           <span className="text-stellar-400">({tokenInfo.symbol})</span>
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-400">
-          <span className="text-xs text-gray-500">{t("sections.contractId")}:</span>
+          <span className="text-xs text-gray-500">
+            {t("sections.contractId")}:
+          </span>
           <ExplorerLink
             type="contract"
             identifier={contractId}
@@ -123,8 +125,40 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
             copyValue={tokenInfo.admin}
             isAddress={true}
           />
+          {tokenInfo.complianceNode && (
+            <InfoCard
+              label="Compliance Node"
+              value={truncateAddress(tokenInfo.complianceNode)}
+              copyValue={tokenInfo.complianceNode}
+              isAddress={true}
+            />
+          )}
         </div>
       </section>
+
+      {/* Metadata URI */}
+      {tokenInfo.contractUri && (
+        <section aria-label="Metadata URI" className="mb-10">
+          <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
+            Metadata
+          </h2>
+          <div className="glass-card flex flex-col gap-1 p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                URI
+              </span>
+            </div>
+            <a
+              href={tokenInfo.contractUri}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="truncate text-lg font-semibold text-stellar-400 hover:text-stellar-300 transition-colors"
+            >
+              {tokenInfo.contractUri}
+            </a>
+          </div>
+        </section>
+      )}
 
       {/* User Actions Panel (Burn Tokens) */}
       <UserPanel contractId={contractId} decimals={tokenInfo.decimals} />
@@ -158,19 +192,10 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
 
       {/* Top holders */}
       <section aria-label={t("sections.topHolders")}>
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4">
           <h2 className="text-sm font-medium uppercase tracking-wider text-gray-500">
             {t("sections.topHolders")}
           </h2>
-          {holders.length > 0 && (
-            <button
-              onClick={() => exportHoldersCsv(holders)}
-              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-stellar-400/30 hover:bg-stellar-500/10 hover:text-stellar-300"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {t("sections.exportCsv")}
-            </button>
-          )}
         </div>
         <HoldersTable
           holders={holders}

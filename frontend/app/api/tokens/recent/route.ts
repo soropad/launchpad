@@ -38,6 +38,19 @@ export async function GET(request: Request) {
     return NextResponse.json(tokens);
   } catch (error) {
     console.error("Failed to fetch recent tokens:", error);
+
+    // If Mercury is not configured, return empty array with informational header
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (
+      errorMessage.includes("getEvents") ||
+      errorMessage.includes("Mercury") ||
+      errorMessage.includes("MERCURY_AUTH_TOKEN")
+    ) {
+      const headers = new Headers();
+      headers.set("X-Note", "Mercury indexer not configured");
+      return NextResponse.json([], { headers });
+    }
+
     return NextResponse.json(
       { error: "Failed to fetch recent tokens." },
       { status: 500 },

@@ -77,26 +77,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           : next;
       });
 
-      // Push to notification history for persistence
+      // Emit notification event for NotificationCenter
       if (typeof window !== "undefined") {
-        const notifBridge = (
-          window as unknown as {
-            __soropadNotifications?: {
-              add: (n: {
-                title: string;
-                message?: string;
-                variant?: ToastVariant;
-                txHash?: string;
-              }) => string;
-            };
-          }
-        ).__soropadNotifications;
-        notifBridge?.add({
-          title: input.title,
-          message: input.message,
-          variant: input.variant,
-          txHash: input.txHash,
+        const event = new CustomEvent("soropad:notification", {
+          detail: {
+            id,
+            title: input.title,
+            message: input.message || "",
+            variant: input.variant || "info",
+            timestamp: Date.now(),
+            read: false,
+          },
         });
+        window.dispatchEvent(event);
       }
 
       if (toast.duration > 0) {
