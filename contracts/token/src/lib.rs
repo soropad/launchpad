@@ -267,17 +267,6 @@ impl TokenContract {
         }
     }
 
-    /// Burn `amount` tokens from the caller's own balance. Refuses to
-    /// run when the account is frozen so a holder cannot dodge a freeze
-    /// by destroying tokens.
-    pub fn burn_self(env: Env, from: Address, amount: i128) {
-        Self::_check_paused(&env);
-        from.require_auth();
-        assert!(amount > 0, "amount must be positive");
-        assert!(!Self::_is_frozen(&env, &from), "account is frozen");
-        Self::_burn(&env, &from, amount);
-    }
-
     /// Propose a new admin. Must be called by the current admin.
     /// The new admin must call `accept_admin` to finalize the transfer.
     pub fn propose_admin(env: Env, new_admin: Address) {
@@ -309,8 +298,7 @@ impl TokenContract {
     /// - The Admin storage entry is removed and a `Locked` flag is set.
     /// - `is_locked()` returns `true` from then on.
     ///
-    /// Holders can still `transfer`, `approve`, `transfer_from`, `burn`,
-    /// and `burn_self`. The token becomes trustless / immutable.
+    /// Holders can still `transfer`, `approve`, `transfer_from`, and `burn`. The token becomes trustless / immutable.
     ///
     /// **This action is irreversible.**
     pub fn revoke_admin(env: Env) {
@@ -853,7 +841,7 @@ impl TokenContract {
     /// | `transfer`, `transfer_from` | yes | holder-to-holder value movement |
     /// | `mint`, `mint_batch` | yes | issuance into a recipient the node may reject |
     /// | `clawback` | yes | forced holder-to-admin value movement |
-    /// | `burn`, `burn_admin`, `burn_self` | no | destroys tokens; there is no recipient to gate, and gating burns would let a failing node trap holders' balances |
+    /// | `burn`, `burn_admin` | no | destroys tokens; there is no recipient to gate, and gating burns would let a failing node trap holders' balances |
     fn _check_compliance(env: &Env, from: &Address, to: &Address) {
         let compliance_node: Option<Address> = env
             .storage()
@@ -1214,10 +1202,10 @@ mod test {
     }
 
     #[test]
-    fn test_burn_self() {
+    fn test_burn() {
         let (_, client, _, user) = setup();
         client.mint(&user, &1000i128);
-        client.burn_self(&user, &500i128);
+        client.burn(&user, &500i128);
         assert_eq!(client.balance(&user), 500i128);
     }
 
@@ -1348,13 +1336,13 @@ mod test {
     }
 
     #[test]
-    fn test_burn_self_reduces_balance_and_supply() {
+    fn test_burn_reduces_balance_and_supply() {
         let (_, client, admin, user) = setup();
         // Admin sends some tokens to user, who then burns them themselves.
         client.transfer(&admin, &user, &500_0000000i128);
         let supply_before = client.total_supply();
 
-        client.burn_self(&user, &200_0000000i128);
+        client.burn(&user, &200_0000000i128);
 
         assert_eq!(client.balance(&user), 300_0000000i128);
         assert_eq!(client.total_supply(), supply_before - 200_0000000i128);
@@ -1362,26 +1350,17 @@ mod test {
 
     #[test]
     #[should_panic(expected = "amount must be positive")]
-    fn test_burn_self_rejects_zero() {
+    fn test_burn_rejects_zero() {
         let (_, client, _, user) = setup();
-        client.burn_self(&user, &0i128);
+        client.burn(&user, &0i128);
     }
 
     #[test]
     #[should_panic(expected = "insufficient balance to burn")]
-    fn test_burn_self_insufficient_balance() {
+    fn test_burn_insufficient_balance() {
         let (_, client, _, user) = setup();
         // user has zero balance; should fail.
-        client.burn_self(&user, &1i128);
-    }
-
-    #[test]
-    #[should_panic(expected = "account is frozen")]
-    fn test_burn_self_blocked_when_frozen() {
-        let (_, client, admin, user) = setup();
-        client.transfer(&admin, &user, &1_000i128);
-        client.freeze_account(&user);
-        client.burn_self(&user, &500i128);
+        client.burn(&user, &1i128);
     }
 
     #[test]
@@ -1606,7 +1585,7 @@ mod test {
         client.transfer(&user, &admin, &200i128);
         assert_eq!(client.balance(&user), 800i128);
 
-        client.burn_self(&user, &100i128);
+        client.burn(&user, &100i128);
         assert_eq!(client.balance(&user), 700i128);
     }
 
