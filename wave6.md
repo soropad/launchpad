@@ -134,11 +134,11 @@ if to == &admin { return; }
 
 🟡 **Medium** · `contracts` `token`
 
-**File:** `contracts/token/src/lib.rs` — `burn()` (lines 143–148) vs `burn_self()` (lines 202–208)
+**File:** `contracts/token/src/lib.rs` — `burn()` (lines 194–200)
 
-**Issue:** `burn_self` asserts `!_is_frozen(from)` (line 206) so a frozen holder can't destroy tokens to dodge a freeze. `burn` — also caller-authorized via `from.require_auth()` — has **no** frozen check, so a frozen account can simply call `burn` instead. Wave 5 #34 flagged this; it remains unfixed.
+**Issue:** `burn` — caller-authorized via `from.require_auth()` — has **no** frozen check, so a frozen account can call `burn` to destroy tokens to dodge a freeze. Wave 5 #34 flagged this; it remains unfixed.
 
-**Fix:** Add `assert!(!Self::_is_frozen(&env, &from), "account is frozen");` to `burn` before `_burn`, plus a `#[should_panic]` test mirroring `test_burn_self_blocked_when_frozen`.
+**Fix:** Add `assert!(!Self::_is_frozen(&env, &from), "account is frozen");` to `burn` before `_burn`, plus a `#[should_panic]` test mirroring `test_burn_blocked_when_frozen`.
 
 ---
 

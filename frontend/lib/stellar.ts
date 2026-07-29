@@ -1628,7 +1628,7 @@ export async function buildBurnTransaction(
     fee: StellarSdk.BASE_FEE,
     networkPassphrase: config.passphrase,
   })
-    .addOperation(contract.call("burn_self", fromScVal, amountScVal))
+    .addOperation(contract.call("burn", fromScVal, amountScVal))
     .setTimeout(30)
     .build();
 
