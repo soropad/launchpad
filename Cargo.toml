@@ -4,6 +4,7 @@ members = [
     "contracts/airdrop",
     "contracts/token",
     "contracts/vesting",
+    "contracts/factory",
 ]
 
 [profile.release]
