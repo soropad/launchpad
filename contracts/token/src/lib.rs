@@ -970,7 +970,20 @@ impl TokenContract {
     /// The cap is only enforced while an admin exists. After
     /// [`revoke_admin`](Self::revoke_admin) removes the admin the cap becomes
     /// inactive so the token remains fully transferable.
+    ///
+    /// Once the contract is locked this returns `None` even if a percentage was
+    /// stored, so the getter never reports a limit that is not being enforced.
+    /// The stored value is deliberately left in place (so a counterfactual
+    /// re-init after a future upgrade sees it) but is masked by the lock state.
     pub fn max_balance_per_account(env: Env) -> Option<u32> {
+        let locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Locked)
+            .unwrap_or(false);
+        if locked {
+            return None;
+        }
         env.storage().instance().get(&DataKey::MaxBalancePerAccount)
     }
 
@@ -1141,19 +1154,16 @@ impl TokenContract {
             return;
         };
 
-        let admin: Option<Address> = env.storage().instance().get(&DataKey::Admin);
-        //         let Some(admin) = env
-        //             .storage()
-        //             .instance()
-        //             .get::<DataKey, Address>(&DataKey::Admin)
-        //         else {
-        //             return; // contract is locked; cap no longer enforced
-        //         };
+        let Some(admin) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::Admin)
+        else {
+            return; // contract is locked (admin revoked); cap no longer enforced
+        };
 
-        if let Some(ref admin_addr) = admin {
-            if to == admin_addr {
-                return;
-            }
+        if to == &admin {
+            return; // the admin is exempt from the cap
         }
 
         let max_allowed = supply
@@ -2448,6 +2458,33 @@ mod test {
 
         client.burn_self(&user, &100i128);
         assert_eq!(client.balance(&user), 550i128);
+    }
+
+    #[test]
+    fn test_non_admin_can_exceed_cap_after_revoke() {
+        let (_, client, admin, user) = setup();
+
+        // Enable a whale cap and move some value to a non-admin holder.
+        client.set_max_balance_per_account(&Some(10u32));
+        client.transfer(&admin, &user, &100_000i128);
+
+        // While the cap is active, exceeding 10% of total supply is rejected.
+        // total_supply == 1_000_000_0000000, 10% == 100_000_0000000.
+        assert_eq!(
+            client.try_transfer(&admin, &user, &100_000_0000000i128),
+            Err(Ok(TokenError::ExceedsMaxBalance.into()))
+        );
+
+        // After revoke_admin the cap is deactivated along with the admin role.
+        client.revoke_admin();
+        assert!(client.is_locked());
+
+        // The getter goes honest: it no longer reports an enforced limit.
+        assert_eq!(client.max_balance_per_account(), None);
+
+        // A non-admin can now accumulate past the former cap without panic.
+        client.transfer(&admin, &user, &100_000_0000000i128);
+        assert_eq!(client.balance(&user), 100_000_0100000i128);
     }
 
     #[test]
