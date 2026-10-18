@@ -22,9 +22,9 @@ contract under `contracts/` has no entry here.
 | `initialize` | `init` | — | — | admin: Address |
 | `mint`, `mint_batch`, `initialize (when initial_supply > 0)` | `mint` | `to: Address` | — | amount: i128 |
 | `burn`, `burn_admin`, `burn_self` | `burn` | `from: Address` | — | amount: i128 |
-| `clawback` | `clawback` | `from: Address` | — | amount: i128 |
-| `transfer`, `transfer_from`, `clawback` | `transfer` | `from: Address` | `to: Address` | amount: i128 |
-| `transfer`, `transfer_from`, `clawback` | `fee_coll` | `from: Address` | `to: Address` | (amount: i128, fee: i128) |
+| `clawback` | `clawback` | `admin: Address` | `from: Address` | amount: i128 |
+| `transfer`, `transfer_from` | `transfer` | `from: Address` | `to: Address` | amount: i128 |
+| `transfer`, `transfer_from` | `fee_coll` | `from: Address` | `to: Address` | (amount: i128, fee: i128) |
 | `approve` | `approve` | `from: Address` | `spender: Address` | amount: i128 |
 | `revoke_admin` | `revoked` | — | — | bool (always true) |
 | `freeze_account` | `freeze` | `addr: Address` | — | () |
@@ -46,7 +46,7 @@ contract under `contracts/` has no entry here.
 | `stream_grant` | `stream` | `recipient: Address` | — | (total: i128, start_ledger: u32, end_ledger: u32, max_per_claim: i128) |
 | `claim_stream` | `claim` | `recipient: Address` | — | (payout: i128, from_ledger: u32, to_ledger: u32) |
 
-> clawback also emits a `transfer` event (from the internal `_transfer` helper it calls) in the same transaction, so a claw-backed balance change shows up as both events.
+> SEP-41 clawback is a burn: it reduces the holder's balance and total_supply and is counted in total_burned. It is the only event clawback emits — no `transfer`, `burn` or `fee_coll` accompanies it, and no transfer fee is charged (issue #544).
 
 > transfer_from re-uses this event because the observable balance change is identical to a direct transfer; the allowance deduction is visible through the `allowance` getter instead.
 

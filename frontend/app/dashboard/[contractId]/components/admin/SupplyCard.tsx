@@ -15,9 +15,10 @@ import { burnSchema, type BurnData } from "./schemas";
 
 /**
  * The two admin-initiated removals share one form because they take the same
- * inputs and differ only in where the tokens end up:
- *   "clawback" → confiscate into the admin balance (reversible)
- *   "burn"     → destroy, reducing total supply (irreversible)
+ * inputs. Both destroy the tokens and reduce total supply (irreversible); they
+ * differ in how the removal is recorded and gated:
+ *   "clawback" → SEP-41 clawback event, checked by the compliance node
+ *   "burn"     → plain burn event
  */
 export function SupplyCard({
   admin,
@@ -62,7 +63,7 @@ export function SupplyCard({
             );
           }}
           options={[
-            { value: "clawback", label: "Confiscate" },
+            { value: "clawback", label: "Claw back" },
             { value: "burn", label: "Destroy" },
           ]}
         />
@@ -73,10 +74,10 @@ export function SupplyCard({
         {mode === "clawback" ? (
           <>
             <span className="font-semibold text-danger">
-              Confiscate to admin (clawback):
+              Claw back (clawback):
             </span>{" "}
-            forcibly moves tokens into the admin balance. Reversible — you can
-            transfer them back later.
+            forcibly removes tokens from the holder, even a frozen one, and
+            burns them, reducing total supply. This cannot be undone.
           </>
         ) : (
           <>

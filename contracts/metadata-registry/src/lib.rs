@@ -138,8 +138,7 @@ impl MetadataRegistryContract {
         storage.set(&DataKey::Initialized, &true);
         storage.set(&DataKey::Admin, &admin);
         storage.set(&DataKey::Factory, &factory);
-        let ttl = Self::_ttl_ledgers(&env);
-        storage.extend_ttl(ttl, ttl);
+        Self::_bump_instance(&env);
         env.events()
             .publish((symbol_short!("init"),), (admin, factory));
     }
@@ -160,6 +159,7 @@ impl MetadataRegistryContract {
         metadata: Option<String>,
     ) {
         Self::_require_factory(&env);
+        Self::_bump_instance(&env);
 
         if symbol.is_empty() || symbol.len() > MAX_SYMBOL_LEN {
             panic_with_error!(&env, RegistryError::InvalidMetadata);
@@ -295,6 +295,7 @@ impl MetadataRegistryContract {
         if new_wasm_hash == BytesN::from_array(&env, &[0; 32]) {
             panic_with_error!(&env, RegistryError::InvalidWasmHash);
         }
+        Self::_bump_instance(&env);
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
         env.events()
@@ -323,6 +324,15 @@ impl MetadataRegistryContract {
         TTL_LEDGERS.min(env.storage().max_ttl())
     }
 
+    /// Extend the instance entry's TTL. `Factory` and `Admin` live there, so
+    /// if it archives `_require_factory` fails with `NotInitialized` and the
+    /// factory's `deploy_token` — which registers every launch — reverts
+    /// until the entry is restored (issue #539).
+    fn _bump_instance(env: &Env) {
+        let ttl = Self::_ttl_ledgers(env);
+        env.storage().instance().extend_ttl(ttl, ttl);
+    }
+
     fn _keccak_string(env: &Env, value: &String, max_len: u32) -> BytesN<32> {
         let len = value.len();
         if len > max_len {
@@ -345,7 +355,10 @@ impl MetadataRegistryContract {
 mod test {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+        testutils::{
+            storage::Instance as _, Address as _, Events as _, Ledger as _, MockAuth,
+            MockAuthInvoke,
+        },
         Env, IntoVal,
     };
 
@@ -682,6 +695,61 @@ mod test {
         env.mock_all_auths();
         let (_, client, _, _) = setup(&env);
         assert_eq!(client.get_record(&Address::generate(&env)), None);
+    }
+
+    fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
+        env.as_contract(contract_id, || env.storage().instance().get_ttl())
+    }
+
+    #[test]
+    fn test_register_extends_instance_ttl_across_quiet_periods() {
+        // Issue #539: only `initialize` extended the instance entry, so once
+        // one TTL window passed without a re-extension the entry holding
+        // `Factory` archived and every later `register` — and with it every
+        // factory `deploy_token` — failed.
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, client, _, factory) = setup(&env);
+        let creator = Address::generate(&env);
+        let ttl = env.as_contract(&contract_id, || {
+            MetadataRegistryContract::_ttl_ledgers(&env)
+        });
+        let quiet_period = ttl - 1;
+
+        // Almost a full window after initialize: one ledger left.
+        env.ledger().set_sequence_number(quiet_period);
+        assert_eq!(instance_ttl(&env, &contract_id), 1);
+        register_as_factory(
+            &env,
+            &contract_id,
+            &factory,
+            &client,
+            &Address::generate(&env),
+            "ONE",
+            "First Token",
+            &creator,
+            1,
+            None,
+        );
+        assert_eq!(instance_ttl(&env, &contract_id), ttl);
+
+        // A second quiet period: past where the initialize-time TTL ended.
+        env.ledger().set_sequence_number(2 * quiet_period);
+        register_as_factory(
+            &env,
+            &contract_id,
+            &factory,
+            &client,
+            &Address::generate(&env),
+            "TWO",
+            "Second Token",
+            &creator,
+            1,
+            None,
+        );
+        assert_eq!(client.get_record_count(), 2);
+        assert_eq!(client.get_factory(), factory);
+        assert_eq!(instance_ttl(&env, &contract_id), ttl);
     }
 
     #[test]

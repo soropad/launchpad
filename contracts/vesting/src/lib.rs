@@ -60,6 +60,8 @@ pub enum VestingError {
     InvalidWasmHash = 22,
     /// The contract is permanently locked (`revoke_admin` was called).
     Locked = 23,
+    /// `extend_cliff` would push `end_ledger` past `u32::MAX`.
+    LedgerOverflow = 24,
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +599,10 @@ impl VestingContract {
         let delta = new_cliff - schedule.cliff_ledger;
         let old_cliff = schedule.cliff_ledger;
         let old_end = schedule.end_ledger;
-        let new_end = schedule.end_ledger + delta;
+        let new_end = schedule
+            .end_ledger
+            .checked_add(delta)
+            .unwrap_or_else(|| panic_with_error!(&env, VestingError::LedgerOverflow));
 
         if new_cliff >= new_end {
             panic_with_error!(&env, VestingError::CliffAfterEnd);
@@ -606,6 +611,10 @@ impl VestingContract {
         schedule.cliff_ledger = new_cliff;
         schedule.end_ledger = new_end;
         env.storage().persistent().set(&key, &schedule);
+
+        // The schedule now lives longer, so its entry must too.
+        let ttl_ledgers = Self::_ttl_ledgers(&env, new_end);
+        Self::_extend_persistent_ttl(&env, &key, ttl_ledgers);
 
         // Emit event with old/new cliff and old/new end
         env.events().publish(

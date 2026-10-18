@@ -42,6 +42,15 @@ const ADMIN_PROPOSAL_EXPIRY_LEDGERS: u32 = TTL_LEDGERS;
 /// `https://` URL while keeping the instance entry small.
 const MAX_CONTRACT_URI_LEN: u32 = 256;
 
+/// Longest token name, in bytes, that `initialize` will store. Matches the
+/// metadata registry's `MAX_NAME_LEN`, so a token the factory deploys can
+/// always be registered.
+const MAX_NAME_LEN: u32 = 256;
+
+/// Longest token symbol, in bytes, that `initialize` will store. Matches the
+/// metadata registry's `MAX_SYMBOL_LEN`.
+const MAX_SYMBOL_LEN: u32 = 32;
+
 /// Hard ceiling on the immutable transfer fee, in basis points
 /// (1 bps = 0.01%). Chosen at deploy, never changed afterward — issue #497.
 const MAX_FEE_BPS: u32 = 1_000; // 10%
@@ -208,6 +217,11 @@ pub enum TokenError {
     AlreadyAdmin = 30,
     /// `accept_admin` was called after the proposal's expiry ledger.
     ProposalExpired = 31,
+    /// `initialize` received an empty name or one longer than `MAX_NAME_LEN`.
+    InvalidName = 32,
+    /// `initialize` received an empty symbol or one longer than
+    /// `MAX_SYMBOL_LEN`.
+    InvalidSymbol = 33,
 }
 
 #[contractclient(name = "ComplianceNodeClient")]
@@ -293,6 +307,19 @@ impl TokenContract {
 
         if fee_bps > MAX_FEE_BPS {
             panic_with_error!(&env, TokenError::InvalidFeeBps);
+        }
+
+        if name.is_empty() || name.len() > MAX_NAME_LEN {
+            panic_with_error!(&env, TokenError::InvalidName);
+        }
+        if symbol.is_empty() || symbol.len() > MAX_SYMBOL_LEN {
+            panic_with_error!(&env, TokenError::InvalidSymbol);
+        }
+
+        // A negative supply would otherwise skip both the cap comparison and
+        // the `initial_supply > 0` mint guard and deploy a zero-supply token.
+        if initial_supply < 0 {
+            panic_with_error!(&env, TokenError::InvalidAmount);
         }
 
         if let Some(cap) = max_supply {
@@ -401,15 +428,18 @@ impl TokenContract {
         Self::_burn(&env, &from, amount);
     }
 
-    /// Forcefully move `amount` tokens from `from` into the admin balance.
-    /// Admin only.
+    /// Claw back `amount` tokens from `from`, destroying them. Admin only.
+    ///
+    /// Per SEP-41 a clawback is a burn: it reduces both the holder's balance
+    /// and the total supply (and is counted in `total_burned`), and it emits
+    /// only the `clawback` event — no `transfer`, no `burn`, and no transfer
+    /// fee (issue #544).
     ///
     /// Deliberate freeze bypass: this is the sanctioned recovery path, so it
-    /// moves value even when `from` is frozen and even when the admin
-    /// recipient would otherwise be gated by the receive-side freeze check.
-    /// Every other credit path (transfer, transfer_from, mint) refuses a
-    /// frozen recipient; clawback is the single documented exception so an
-    /// issuer can always recover funds from a blacklisted account.
+    /// removes value even when `from` is frozen. Every holder-initiated
+    /// removal (burn, burn_self, transfer) refuses a frozen account; clawback
+    /// is the single documented exception so an issuer can always recover
+    /// funds from a blacklisted account.
     pub fn clawback(env: Env, from: Address, amount: i128) {
         Self::_check_paused(&env);
         Self::_require_admin(&env);
@@ -423,17 +453,13 @@ impl TokenContract {
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic_with_error!(&env, TokenError::Locked));
         Self::_check_compliance(&env, &from, &admin);
-        Self::_transfer_bypass_frozen(&env, &from, &admin, amount);
+        Self::_destroy(&env, &from, amount);
 
         let ttl_ledgers = Self::_ttl_ledgers(&env);
         let from_key = DataKey::Balance(from.clone());
-        let admin_key = DataKey::Balance(admin.clone());
         env.storage()
             .persistent()
             .extend_ttl(&from_key, ttl_ledgers, ttl_ledgers);
-        env.storage()
-            .persistent()
-            .extend_ttl(&admin_key, ttl_ledgers, ttl_ledgers);
 
         env.events()
             .publish((symbol_short!("clawback"), admin, from), amount);
@@ -599,7 +625,7 @@ impl TokenContract {
     /// the admin cannot mint into it. Admin only.
     ///
     /// Admin [`clawback`](Self::clawback) is the sole exception and may still
-    /// pull tokens from a frozen account back to the admin.
+    /// claw tokens back out of a frozen account.
     pub fn freeze_account(env: Env, addr: Address) {
         Self::_require_admin(&env);
         let key = DataKey::Frozen(addr.clone());
@@ -1526,7 +1552,7 @@ impl TokenContract {
     /// | --- | --- | --- |
     /// | `transfer`, `transfer_from` | yes | holder-to-holder value movement |
     /// | `mint`, `mint_batch` | yes | issuance into a recipient the node may reject |
-    /// | `clawback` | yes | forced holder-to-admin value movement |
+    /// | `clawback` | yes | forced removal from a holder, asked as `can_trade(from, admin)` |
     /// | `burn`, `burn_admin`, `burn_self` | no | destroys tokens; there is no recipient to gate, and gating burns would let a failing node trap holders' balances |
     fn _check_compliance(env: &Env, from: &Address, to: &Address) {
         if Self::is_locked(env.clone()) {
@@ -1700,6 +1726,15 @@ impl TokenContract {
     }
 
     fn _burn(env: &Env, from: &Address, amount: i128) {
+        Self::_destroy(env, from, amount);
+        env.events()
+            .publish((symbol_short!("burn"), from.clone()), amount);
+    }
+
+    /// Remove `amount` from `from`'s balance and from the total supply, and
+    /// add it to `total_burned`. Emits nothing: `_burn` publishes `burn` and
+    /// `clawback` publishes `clawback`, so each path emits exactly one event.
+    fn _destroy(env: &Env, from: &Address, amount: i128) {
         let key = DataKey::Balance(from.clone());
         let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         if balance < amount {
@@ -1731,15 +1766,11 @@ impl TokenContract {
         env.storage()
             .instance()
             .set(&DataKey::TotalBurned, &new_total_burned);
-
-        env.events()
-            .publish((symbol_short!("burn"), from.clone()), amount);
     }
 
     /// Public transfer path. Enforces the receive-side freeze: a frozen
-    /// recipient cannot be credited. Admin recovery goes through
-    /// [`Self::_transfer_bypass_frozen`] instead, so a blacklisted account's
-    /// tokens can still be clawed back.
+    /// recipient cannot be credited. Admin recovery from a frozen account is
+    /// [`Self::clawback`], which burns rather than transfers.
     fn _transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
         if Self::_is_frozen(env, to) {
             panic_with_error!(env, TokenError::Frozen);
@@ -1747,18 +1778,9 @@ impl TokenContract {
         Self::_transfer_internal(env, from, to, amount);
     }
 
-    /// Transfer that deliberately skips the recipient freeze check. Only
-    /// reachable from [`Self::clawback`], whose whole purpose is to move value
-    /// out of a frozen account back to the admin. `clawback` already guards
-    /// that the recipient is the caller-controlled admin, so this bypass
-    /// cannot be used to credit an arbitrary frozen third party.
-    fn _transfer_bypass_frozen(env: &Env, from: &Address, to: &Address, amount: i128) {
-        Self::_transfer_internal(env, from, to, amount);
-    }
-
-    /// Shared balance-movement core for both the gated and bypass paths.
-    /// Callers are responsible for any freeze / compliance / authorization
-    /// checks appropriate to their path before calling this.
+    /// Balance-movement core behind [`Self::_transfer`]. Callers are
+    /// responsible for any freeze / compliance / authorization checks
+    /// appropriate to their path before calling this.
     fn _transfer_internal(env: &Env, from: &Address, to: &Address, amount: i128) {
         let from_key = DataKey::Balance(from.clone());
         let to_key = DataKey::Balance(to.clone());
@@ -2931,12 +2953,110 @@ mod test {
         client.transfer(&admin, &user, &1_000i128);
         let admin_before = client.balance(&admin);
 
+        let supply_before = client.total_supply();
+
         client.freeze_account(&user);
-        // Clawback must bypass the freeze on both sides and pull funds to admin.
+        // Clawback must bypass the freeze and destroy the frozen funds.
         client.clawback(&user, &1_000i128);
 
         assert_eq!(client.balance(&user), 0i128);
-        assert_eq!(client.balance(&admin), admin_before + 1_000i128);
+        assert_eq!(client.balance(&admin), admin_before);
+        assert_eq!(client.total_supply(), supply_before - 1_000i128);
+    }
+
+    // ── Regression tests for issue #544: clawback is a SEP-41 burn ──────
+    //
+    // Before this fix clawback was a holder-to-admin transfer: TotalSupply
+    // was unchanged and a `transfer` event (plus `fee_coll` when a fee was
+    // set) was published alongside `clawback`, so SEP-41 indexers misstated
+    // circulating supply and double-counted the movement.
+
+    #[test]
+    fn test_clawback_reduces_balance_and_total_supply() {
+        let (_, client, admin, user) = setup();
+        client.transfer(&admin, &user, &1_000i128);
+        let admin_before = client.balance(&admin);
+        let supply_before = client.total_supply();
+
+        client.clawback(&user, &400i128);
+
+        assert_eq!(client.balance(&user), 600i128);
+        assert_eq!(client.balance(&admin), admin_before);
+        assert_eq!(client.total_supply(), supply_before - 400i128);
+        assert_eq!(client.total_burned(), 400i128);
+    }
+
+    #[test]
+    fn test_clawback_emits_only_the_clawback_event() {
+        let (env, client, admin, user) = setup();
+        client.transfer(&admin, &user, &1_000i128);
+
+        client.clawback(&user, &400i128);
+        // `all()` returns only the events of the last invocation, so this is
+        // clawback's complete event list: no `transfer`, `burn` or `fee_coll`.
+        assert_eq!(
+            env.events().all(),
+            soroban_sdk::vec![
+                &env,
+                (
+                    client.address.clone(),
+                    (symbol_short!("clawback"), admin, user).into_val(&env),
+                    400i128.into_val(&env)
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_clawback_charges_no_transfer_fee() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(TokenContract, ());
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let fee_recipient = Address::generate(&env);
+
+        client.initialize(
+            &admin,
+            &7u32,
+            &String::from_str(&env, "FeeToken"),
+            &String::from_str(&env, "FEE"),
+            &10_000i128,
+            &None,
+            &false,
+            &false,
+            &None,
+            &None,
+            &MAX_FEE_BPS,
+            &fee_recipient,
+        );
+        client.transfer(&admin, &user, &1_000i128);
+        let fees_before = client.balance(&fee_recipient);
+        let supply_before = client.total_supply();
+
+        client.clawback(&user, &client.balance(&user));
+
+        assert_eq!(client.balance(&user), 0i128);
+        assert_eq!(client.balance(&fee_recipient), fees_before);
+        assert_eq!(
+            client.total_supply(),
+            supply_before - (1_000i128 - 1_000i128 * MAX_FEE_BPS as i128 / 10_000)
+        );
+    }
+
+    #[test]
+    fn test_clawback_rejects_more_than_balance() {
+        let (_, client, admin, user) = setup();
+        client.transfer(&admin, &user, &1_000i128);
+        let supply_before = client.total_supply();
+
+        assert_eq!(
+            client.try_clawback(&user, &1_001i128),
+            Err(Ok(TokenError::InsufficientBalance.into()))
+        );
+        assert_eq!(client.balance(&user), 1_000i128);
+        assert_eq!(client.total_supply(), supply_before);
     }
 
     #[test]
@@ -3385,6 +3505,136 @@ mod test {
             ),
             Err(Ok(TokenError::ExceedsInitialSupply.into()))
         );
+    }
+
+    // ── Regression tests for issue #547 (restores #262) ─────────────────
+
+    /// `try_initialize` on a fresh contract with only the fields under test
+    /// varying. Returns the client so a success can be inspected.
+    fn try_init_with(
+        env: &Env,
+        name: &String,
+        symbol: &String,
+        initial_supply: i128,
+        max_supply: Option<i128>,
+    ) -> (
+        TokenContractClient<'static>,
+        Result<(), Result<soroban_sdk::Error, soroban_sdk::InvokeError>>,
+    ) {
+        let contract_id = env.register(TokenContract, ());
+        let client = TokenContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let result = client
+            .try_initialize(
+                &admin,
+                &7u32,
+                name,
+                symbol,
+                &initial_supply,
+                &max_supply,
+                &false,
+                &false,
+                &None,
+                &None,
+                &0u32,
+                &admin,
+            )
+            .map(|_| ());
+        (client, result)
+    }
+
+    /// A string of exactly `len` ASCII bytes.
+    fn string_of_len(env: &Env, len: usize) -> String {
+        String::from_bytes(env, &[b'a'; 2 * MAX_NAME_LEN as usize][..len])
+    }
+
+    #[test]
+    fn test_initialize_rejects_negative_initial_supply() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let name = String::from_str(&env, "TestToken");
+        let symbol = String::from_str(&env, "TST");
+
+        for max_supply in [None, Some(10_000i128)] {
+            let (client, result) = try_init_with(&env, &name, &symbol, -500, max_supply);
+            assert_eq!(result, Err(Ok(TokenError::InvalidAmount.into())));
+
+            // Nothing was persisted, so a valid initialize still goes through.
+            let admin = Address::generate(&env);
+            client.initialize(
+                &admin,
+                &7u32,
+                &name,
+                &symbol,
+                &500i128,
+                &max_supply,
+                &false,
+                &false,
+                &None,
+                &None,
+                &0u32,
+                &admin,
+            );
+            assert_eq!(client.total_supply(), 500i128);
+        }
+    }
+
+    #[test]
+    fn test_initialize_accepts_zero_initial_supply() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, result) = try_init_with(
+            &env,
+            &String::from_str(&env, "TestToken"),
+            &String::from_str(&env, "TST"),
+            0,
+            None,
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(client.total_supply(), 0i128);
+    }
+
+    #[test]
+    fn test_initialize_rejects_empty_or_oversized_name() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let symbol = String::from_str(&env, "TST");
+
+        for name in [
+            String::from_str(&env, ""),
+            string_of_len(&env, MAX_NAME_LEN as usize + 1),
+        ] {
+            let (_, result) = try_init_with(&env, &name, &symbol, 0, None);
+            assert_eq!(result, Err(Ok(TokenError::InvalidName.into())));
+        }
+    }
+
+    #[test]
+    fn test_initialize_rejects_empty_or_oversized_symbol() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let name = String::from_str(&env, "TestToken");
+
+        for symbol in [
+            String::from_str(&env, ""),
+            string_of_len(&env, MAX_SYMBOL_LEN as usize + 1),
+        ] {
+            let (_, result) = try_init_with(&env, &name, &symbol, 0, None);
+            assert_eq!(result, Err(Ok(TokenError::InvalidSymbol.into())));
+        }
+    }
+
+    #[test]
+    fn test_initialize_accepts_name_and_symbol_at_length_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let name = string_of_len(&env, MAX_NAME_LEN as usize);
+        let symbol = string_of_len(&env, MAX_SYMBOL_LEN as usize);
+
+        let (client, result) = try_init_with(&env, &name, &symbol, 0, None);
+        assert_eq!(result, Ok(()));
+        assert_eq!(client.name(), name);
+        assert_eq!(client.symbol(), symbol);
     }
 
     #[test]
